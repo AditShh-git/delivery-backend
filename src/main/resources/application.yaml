@@ -1,0 +1,48 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/delivery_db?options=-c%20TimeZone=Asia/Kolkata
+    username: delivery_user
+    password: delivery_pass
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 60000
+
+logging:
+  level:
+    root: INFO
+    com.delivery: DEBUG
+
+  file:
+    name: logs/delivery.log
+
+  pattern:
+    console: "%clr(%d{HH:mm:ss}){cyan} %clr(%-5level) %clr([%thread]){magenta} %clr(%logger{25}){yellow} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%level] %logger{36} - %msg%n"
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
