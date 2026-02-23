@@ -3,9 +3,9 @@ server:
 
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/delivery_db?options=-c%20TimeZone=Asia/Kolkata
-    username: delivery_user
-    password: delivery_pass
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
 
   jpa:
     hibernate:
@@ -22,11 +22,10 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
-  data:
+   data:
     redis:
-      host: localhost
-      port: 6379
-      timeout: 60000
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
 
 logging:
   level:
