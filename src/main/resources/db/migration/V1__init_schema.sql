@@ -11,9 +11,10 @@ CREATE TABLE roles (
 -- =========================
 CREATE TABLE companies (
                            id BIGSERIAL PRIMARY KEY,
-                           name VARCHAR(150) NOT NULL,
-                           contact_email VARCHAR(150),
-                           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                           name VARCHAR(150) NOT NULL UNIQUE,
+                           contact VARCHAR(150),
+                           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- =========================
@@ -21,17 +22,14 @@ CREATE TABLE companies (
 -- =========================
 CREATE TABLE users (
                        id BIGSERIAL PRIMARY KEY,
-                       name VARCHAR(150) NOT NULL,
                        email VARCHAR(150) NOT NULL UNIQUE,
                        password VARCHAR(255) NOT NULL,
-                       role_id BIGINT NOT NULL,
+                       full_name VARCHAR(150) NOT NULL,
+                       phone VARCHAR(20),
                        company_id BIGINT,
-                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-                       CONSTRAINT fk_user_role
-                           FOREIGN KEY (role_id)
-                               REFERENCES roles(id)
-                               ON DELETE RESTRICT,
+                       enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
                        CONSTRAINT fk_user_company
                            FOREIGN KEY (company_id)
@@ -40,17 +38,30 @@ CREATE TABLE users (
 );
 
 -- =========================
+-- USER_ROLES (Many-to-Many)
+-- =========================
+CREATE TABLE user_roles (
+                            user_id BIGINT NOT NULL,
+                            role_id BIGINT NOT NULL,
+                            PRIMARY KEY (user_id, role_id),
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+);
+
+-- =========================
 -- RIDERS TABLE
 -- =========================
 CREATE TABLE riders (
                         id BIGSERIAL PRIMARY KEY,
                         user_id BIGINT NOT NULL UNIQUE,
-                        active BOOLEAN DEFAULT TRUE,
+                        vehicle_type VARCHAR(50),
+                        license_plate VARCHAR(20),
+                        zone VARCHAR(100),
+                        is_available BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-                        CONSTRAINT fk_rider_user
-                            FOREIGN KEY (user_id)
-                                REFERENCES users(id)
-                                ON DELETE CASCADE
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- =========================
@@ -58,46 +69,23 @@ CREATE TABLE riders (
 -- =========================
 CREATE TABLE orders (
                         id BIGSERIAL PRIMARY KEY,
-                        customer_id BIGINT NOT NULL,
                         company_id BIGINT NOT NULL,
+                        customer_id BIGINT NOT NULL,
                         rider_id BIGINT,
-                        status VARCHAR(50) NOT NULL DEFAULT 'CREATED',
-                        attempt_count INT DEFAULT 0,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        status VARCHAR(30) NOT NULL DEFAULT 'CREATED',
+                        delivery_address TEXT NOT NULL,
+                        items JSONB,
+                        attempt_count SMALLINT NOT NULL DEFAULT 0,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-                        CONSTRAINT fk_order_customer
-                            FOREIGN KEY (customer_id)
-                                REFERENCES users(id)
-                                ON DELETE RESTRICT,
-
-                        CONSTRAINT fk_order_company
-                            FOREIGN KEY (company_id)
-                                REFERENCES companies(id)
-                                ON DELETE RESTRICT,
-
-                        CONSTRAINT fk_order_rider
-                            FOREIGN KEY (rider_id)
-                                REFERENCES riders(id)
-                                ON DELETE SET NULL
+                        FOREIGN KEY (company_id) REFERENCES companies(id),
+                        FOREIGN KEY (customer_id) REFERENCES users(id),
+                        FOREIGN KEY (rider_id) REFERENCES riders(id)
 );
 
 -- =========================
--- AUDIT LOG TABLE
--- =========================
-CREATE TABLE audit_log (
-                           id BIGSERIAL PRIMARY KEY,
-                           action VARCHAR(150) NOT NULL,
-                           performed_by BIGINT,
-                           performed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-                           CONSTRAINT fk_audit_user
-                               FOREIGN KEY (performed_by)
-                                   REFERENCES users(id)
-                                   ON DELETE SET NULL
-);
-
--- =========================
--- DEFAULT ROLE DATA
+-- DEFAULT ROLES
 -- =========================
 INSERT INTO roles (name) VALUES ('ADMIN');
 INSERT INTO roles (name) VALUES ('RIDER');
