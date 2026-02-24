@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 8081
 
 spring:
   profiles:
@@ -22,8 +22,10 @@ spring:
 
 logging:
   level:
-    root: INFO
-    com.delivery: DEBUG
+    com.delivery: DEBUG          # your package — sees all debug logs
+    org.springframework.security: INFO   # security framework — info only
+    org.hibernate.SQL: DEBUG     # see SQL queries
+    org.hibernate.orm.jdbc.bind: TRACE   # see SQL parameters
 
   file:
     name: logs/delivery.log
@@ -37,3 +39,17 @@ springdoc:
     path: /api-docs
   swagger-ui:
     path: /swagger-ui.html
+
+app:
+  jwt:
+    secret: 0NurghFgn5qfCSBz6cGQkTa/Pc1HYHqmWqx+d9OYesujKjjixNpGEgwC+bUlVTaPabjPPWrlzjKRODEyS9ZtA==
+    expiration-ms: 86400000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    mappings:
+      enabled: true
