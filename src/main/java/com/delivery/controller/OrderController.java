@@ -1,6 +1,6 @@
 package com.delivery.controller;
 
-import com.delivery.dto.OrderStatusUpdateRequest;
+import com.delivery.dto.request.OrderStatusUpdateRequest;
 import com.delivery.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;

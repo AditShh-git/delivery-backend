@@ -31,6 +31,7 @@ public class User {
     @Column(name = "full_name", nullable = false)
     private String fullName;
 
+    @Column(unique = true)
     private String phone;
 
     @Column(nullable = false)
@@ -50,5 +51,15 @@ public class User {
 
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        createdAt = updatedAt = OffsetDateTime.now();
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = OffsetDateTime.now();
+    }
 
 }

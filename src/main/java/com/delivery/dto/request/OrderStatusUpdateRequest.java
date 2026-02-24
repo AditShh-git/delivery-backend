@@ -1,4 +1,4 @@
-package com.delivery.dto;
+package com.delivery.dto.request;
 
 import com.delivery.entity.OrderStatus;
 import lombok.Getter;
