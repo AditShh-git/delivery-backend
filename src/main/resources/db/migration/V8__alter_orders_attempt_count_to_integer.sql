@@ -1,0 +1,2 @@
+ALTER TABLE orders
+ALTER COLUMN attempt_count TYPE INTEGER;

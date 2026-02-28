@@ -9,4 +9,5 @@ import java.util.Optional;
 @Repository
 public interface RiderRepository extends JpaRepository<Rider, Long> {
     Optional<Rider> findByUserId(Long userId);
+    Optional<Rider> findByUserIdAndCompanyId(Long userId, Long companyId);
 }

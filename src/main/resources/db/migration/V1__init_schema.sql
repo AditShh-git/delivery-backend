@@ -83,11 +83,3 @@ CREATE TABLE orders (
                         FOREIGN KEY (customer_id) REFERENCES users(id),
                         FOREIGN KEY (rider_id) REFERENCES riders(id)
 );
-
--- =========================
--- DEFAULT ROLES
--- =========================
-INSERT INTO roles (name) VALUES ('ADMIN');
-INSERT INTO roles (name) VALUES ('RIDER');
-INSERT INTO roles (name) VALUES ('CUSTOMER');
-INSERT INTO roles (name) VALUES ('COMPANY');

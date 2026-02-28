@@ -23,7 +23,14 @@ public class Company {
     @Column(nullable = false, unique = true)
     private String name;
 
+    @Column(nullable = false, unique = true)
     private String contact;
+
+    @Column(nullable = false, unique = true)
+    private String email;
+
+    @Enumerated(EnumType.STRING)
+    private DeliveryModel deliveryModel = DeliveryModel.SCHEDULED;
 
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;

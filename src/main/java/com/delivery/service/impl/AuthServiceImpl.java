@@ -5,7 +5,6 @@ import com.delivery.dto.request.SignupRequest;
 import com.delivery.dto.response.AuthResponse;
 import com.delivery.entity.Company;
 import com.delivery.entity.Role;
-import com.delivery.entity.Rider;
 import com.delivery.exception.ApiException;
 import com.delivery.exception.EmailAlreadyExistsException;
 import com.delivery.repository.*;
@@ -28,7 +27,6 @@ public class AuthServiceImpl implements AuthService {
 
     private final UserRepository    userRepository;
     private final RoleRepository    roleRepository;
-    private final RiderRepository   riderRepository;
     private final CompanyRepository companyRepository;
     private final PasswordEncoder   passwordEncoder;
     private final AuthenticationManager authManager;
@@ -79,10 +77,7 @@ public class AuthServiceImpl implements AuthService {
         log.info("User saved — email: {}, role: {}", user.getEmail(), role.getName());
 
         if ("RIDER".equalsIgnoreCase(request.role())) {
-            Rider rider = new Rider();
-            rider.setUser(user);
-            riderRepository.save(rider);
-            log.info("Rider profile created for: {}", request.email());
+            throw new ApiException("Riders must be created by a company or admin");
         }
 
         log.info("Signup successful — email: {}, role: {}", user.getEmail(), role.getName());

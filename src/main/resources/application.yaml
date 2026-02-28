@@ -2,9 +2,6 @@ server:
   port: 8081
 
 spring:
-  profiles:
-    active: local
-
   jpa:
     hibernate:
       ddl-auto: validate
@@ -22,10 +19,10 @@ spring:
 
 logging:
   level:
-    com.delivery: DEBUG          # your package — sees all debug logs
-    org.springframework.security: INFO   # security framework — info only
-    org.hibernate.SQL: DEBUG     # see SQL queries
-    org.hibernate.orm.jdbc.bind: TRACE   # see SQL parameters
+    com.delivery: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
 
   file:
     name: logs/delivery.log
@@ -42,8 +39,10 @@ springdoc:
 
 app:
   jwt:
-    secret: 0NurghFgn5qfCSBz6cGQkTa/Pc1HYHqmWqx+d9OYesujKjjixNpGEgwC+bUlVTaPabjPPWrlzjKRODEyS9ZtA==
+    secret: ${JWT_SECRET}
     expiration-ms: 86400000
+  webhook:
+    secret: ${WEBHOOK_SECRET}
 
 management:
   endpoints:

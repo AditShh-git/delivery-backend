@@ -6,27 +6,38 @@ import java.util.Set;
 public enum OrderStatus {
 
     CREATED,
+    CONFIRMATION_PENDING,
+    CONFIRMED,
     ASSIGNED,
     IN_TRANSIT,
     DELIVERED,
-    FAILED;
+    COLLECTED,
+    DISPUTED,
+    FAILED,
+    CANCELLED;
 
     private Set<OrderStatus> allowedTransitions;
 
     static {
+        CREATED.allowedTransitions              = EnumSet.of(CONFIRMATION_PENDING, CANCELLED);
 
-        CREATED.allowedTransitions = EnumSet.of(ASSIGNED);
+        CONFIRMATION_PENDING.allowedTransitions = EnumSet.of(CONFIRMED, CANCELLED);
 
-        ASSIGNED.allowedTransitions = EnumSet.of(IN_TRANSIT, CREATED);
+        CONFIRMED.allowedTransitions            = EnumSet.of(ASSIGNED, CANCELLED);
 
-        IN_TRANSIT.allowedTransitions = EnumSet.of(DELIVERED, FAILED);
+        ASSIGNED.allowedTransitions             = EnumSet.of(IN_TRANSIT, CANCELLED);
 
-        DELIVERED.allowedTransitions = EnumSet.noneOf(OrderStatus.class);
+        IN_TRANSIT.allowedTransitions           = EnumSet.of(DELIVERED, COLLECTED, FAILED, DISPUTED);
 
-        FAILED.allowedTransitions = EnumSet.of(ASSIGNED);
+        FAILED.allowedTransitions               = EnumSet.of(ASSIGNED, CANCELLED);
+
+        DELIVERED.allowedTransitions            = EnumSet.noneOf(OrderStatus.class);
+        COLLECTED.allowedTransitions            = EnumSet.noneOf(OrderStatus.class);
+        DISPUTED.allowedTransitions             = EnumSet.noneOf(OrderStatus.class);
+        CANCELLED.allowedTransitions            = EnumSet.noneOf(OrderStatus.class);
     }
 
-    public boolean canTransitionTo(OrderStatus nextStatus) {
-        return allowedTransitions.contains(nextStatus);
+    public boolean canTransitionTo(OrderStatus next) {
+        return allowedTransitions.contains(next);
     }
 }
