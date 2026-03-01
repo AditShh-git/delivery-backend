@@ -336,7 +336,7 @@ public class OrderServiceImpl implements OrderService {
 
             order.setStatus(OrderStatus.FAILED);
 
-            // 🔥 IMPORTANT FIX: Release rider correctly if max attempts reached
+
             if (missedSlots >= maxAttempts) {
 
                 log.error("Max missed slots reached. Auto-unassigning rider.");
@@ -344,7 +344,7 @@ public class OrderServiceImpl implements OrderService {
                 Rider rider = order.getRider();
 
                 if (rider != null) {
-                    rider.decrementActiveOrders();  // ✅ FIXED
+                    rider.decrementActiveOrders();
                 }
 
                 order.setRider(null);
@@ -356,7 +356,7 @@ public class OrderServiceImpl implements OrderService {
         // ── NORMAL STATUS UPDATE ────────────────────────────────────
         order.setStatus(newStatus);
 
-        // 🔥 IMPORTANT FIX: Properly release rider on terminal states
+
         if (newStatus == OrderStatus.DELIVERED
                 || newStatus == OrderStatus.COLLECTED
                 || newStatus == OrderStatus.DISPUTED
@@ -365,7 +365,7 @@ public class OrderServiceImpl implements OrderService {
             Rider rider = order.getRider();
 
             if (rider != null) {
-                rider.decrementActiveOrders();  // ✅ FIXED
+                rider.decrementActiveOrders();
                 log.info("Rider {} freed — order {} reached terminal status {}",
                         rider.getId(), orderId, newStatus);
             }
@@ -436,7 +436,8 @@ public class OrderServiceImpl implements OrderService {
 
         // Release rider if assigned
         if (order.getRider() != null) {
-            order.getRider().setIsAvailable(true);
+            Rider rider = order.getRider();
+            rider.decrementActiveOrders();
             order.setRider(null);
         }
 
@@ -638,7 +639,8 @@ public class OrderServiceImpl implements OrderService {
 
         //  Auto free rider if assigned
         if (order.getRider() != null) {
-            order.getRider().setIsAvailable(true);
+            Rider rider = order.getRider();
+            rider.decrementActiveOrders();
             order.setRider(null);
         }
 

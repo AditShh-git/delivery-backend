@@ -2,6 +2,7 @@ package com.delivery.controller;
 
 import com.delivery.entity.Order;
 import com.delivery.entity.OrderStatus;
+import com.delivery.entity.Rider;
 import com.delivery.exception.ApiException;
 import com.delivery.repository.OrderRepository;
 import com.delivery.slot.SlotCapacityRepository;
@@ -88,7 +89,8 @@ public class WhatsAppWebhookController {
                 }
 
                 if (order.getRider() != null) {
-                    order.getRider().setIsAvailable(true);
+                    Rider rider = order.getRider();
+                    rider.decrementActiveOrders();
                     order.setRider(null);
                 }
 

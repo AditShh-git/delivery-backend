@@ -66,10 +66,23 @@ public class AuthServiceImpl implements AuthService {
         user.getRoles().add(role);
 
         if ("COMPANY".equalsIgnoreCase(request.role())) {
+
+            String normalizedEmail = request.email().trim().toLowerCase();
+            String normalizedPhone = request.phone().trim();
+
+            if (companyRepository.existsByEmail(normalizedEmail)) {
+                throw new ApiException("Company already registered with this email");
+            }
+
             Company company = new Company();
-            company.setName(request.fullName() + " Company");
+            company.setName(request.fullName().trim() + " Company");
+            company.setEmail(normalizedEmail);
+            company.setContact(normalizedPhone);
+            // deliveryModel default remains SCHEDULED
+
             companyRepository.save(company);
             user.setCompany(company);
+
             log.info("Company profile created for: {}", request.email());
         }
 
