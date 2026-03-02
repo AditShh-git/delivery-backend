@@ -18,6 +18,7 @@ import com.delivery.repository.UserRepository;
 import com.delivery.service.RiderService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,19 +28,20 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class RiderServiceImpl implements RiderService {
 
-    private final UserRepository    userRepository;
+    private final UserRepository userRepository;
     private final CompanyRepository companyRepository;
-    private final RiderRepository   riderRepository;
-    private final RoleRepository    roleRepository;
-    private final PasswordEncoder   passwordEncoder;
+    private final RiderRepository riderRepository;
+    private final RoleRepository roleRepository;
+    private final PasswordEncoder passwordEncoder;
 
     // ─── CREATE RIDER ──────────────────────────────────────────────────────
 
     @Override
     @Transactional
+    @CacheEvict(value = "adminDashboard", allEntries = true)
     public RiderResponse createRider(CreateRiderRequest request,
-                                     Long creatorUserId,
-                                     String creatorRole) {
+            Long creatorUserId,
+            String creatorRole) {
 
         log.info("Creating rider. CreatorUserId={}, CreatorRole={}, Email={}",
                 creatorUserId, creatorRole, request.email());
@@ -120,8 +122,8 @@ public class RiderServiceImpl implements RiderService {
         // Admin must call PATCH /riders/{id}/duty?onDuty=true to activate
         rider.setIsOnDuty(false);
         rider.setActiveOrderCount(0);
-        rider.setMaxConcurrentOrders(1);  // default 1; admin changes for PARCEL riders
-        rider.setIsAvailable(false);      // false until admin marks on duty
+        rider.setMaxConcurrentOrders(1); // default 1; admin changes for PARCEL riders
+        rider.setIsAvailable(false); // false until admin marks on duty
 
         riderRepository.save(rider);
 
@@ -132,8 +134,7 @@ public class RiderServiceImpl implements RiderService {
                 riderUser.getFullName(),
                 riderUser.getEmail(),
                 company.getName(),
-                rider.getIsAvailable()
-        );
+                rider.getIsAvailable());
     }
 
     // ─── UPDATE RIDER ──────────────────────────────────────────────────────
@@ -141,9 +142,9 @@ public class RiderServiceImpl implements RiderService {
     @Override
     @Transactional
     public RiderResponse updateRider(Long riderId,
-                                     UpdateRiderRequest request,
-                                     Long userId,
-                                     String role) {
+            UpdateRiderRequest request,
+            Long userId,
+            String role) {
 
         Rider rider = riderRepository.findById(riderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Rider", riderId));
@@ -166,9 +167,12 @@ public class RiderServiceImpl implements RiderService {
             }
         }
 
-        if (request.vehicleType()  != null) rider.setVehicleType(request.vehicleType());
-        if (request.licensePlate() != null) rider.setLicensePlate(request.licensePlate());
-        if (request.zone()         != null) rider.setZone(request.zone());
+        if (request.vehicleType() != null)
+            rider.setVehicleType(request.vehicleType());
+        if (request.licensePlate() != null)
+            rider.setLicensePlate(request.licensePlate());
+        if (request.zone() != null)
+            rider.setZone(request.zone());
 
         // NOTE: isAvailable is no longer set directly — use /duty endpoint instead
         // Kept here for backward compatibility only
@@ -182,8 +186,7 @@ public class RiderServiceImpl implements RiderService {
                 rider.getUser().getFullName(),
                 rider.getUser().getEmail(),
                 rider.getCompany().getName(),
-                rider.getIsAvailable()
-        );
+                rider.getIsAvailable());
     }
 
     // ─── UPDATE PASSWORD ───────────────────────────────────────────────────
@@ -191,9 +194,9 @@ public class RiderServiceImpl implements RiderService {
     @Override
     @Transactional
     public void updatePassword(Long riderId,
-                               UpdatePasswordRequest request,
-                               Long userId,
-                               String role) {
+            UpdatePasswordRequest request,
+            Long userId,
+            String role) {
 
         Rider rider = riderRepository.findById(riderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Rider", riderId));
@@ -222,9 +225,10 @@ public class RiderServiceImpl implements RiderService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "adminDashboard", allEntries = true)
     public RiderResponse setDutyStatus(Long riderId,
-                                       boolean onDuty,
-                                       int maxConcurrentOrders) {
+            boolean onDuty,
+            int maxConcurrentOrders) {
 
         Rider rider = riderRepository.findById(riderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Rider", riderId));
@@ -248,7 +252,6 @@ public class RiderServiceImpl implements RiderService {
                 rider.getUser().getFullName(),
                 rider.getUser().getEmail(),
                 rider.getCompany().getName(),
-                rider.getIsAvailable()
-        );
+                rider.getIsAvailable());
     }
 }

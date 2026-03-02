@@ -41,7 +41,7 @@ public class RiderController {
     @PatchMapping("/riders/{id}")
     @PreAuthorize("hasRole('COMPANY') or hasRole('ADMIN') or hasRole('RIDER')")
     public ResponseEntity<RiderResponse> updateRider(
-            @PathVariable Long id,
+            @PathVariable("id") Long id,
             @RequestBody UpdateRiderRequest request,
             Authentication auth) {
 
@@ -49,14 +49,13 @@ public class RiderController {
         String role = securityUtils.extractRole(auth);
 
         return ResponseEntity.ok(
-                riderService.updateRider(id, request, userId, role)
-        );
+                riderService.updateRider(id, request, userId, role));
     }
 
     @PatchMapping("/riders/{id}/password")
     @PreAuthorize("hasRole('RIDER') or hasRole('ADMIN')")
     public ResponseEntity<?> updatePassword(
-            @PathVariable Long id,
+            @PathVariable("id") Long id,
             @Valid @RequestBody UpdatePasswordRequest request,
             Authentication auth) {
 
@@ -71,7 +70,7 @@ public class RiderController {
     @PatchMapping("/riders/{id}/duty")
     @PreAuthorize("hasAnyRole('ADMIN','COMPANY','RIDER')")
     public ResponseEntity<RiderResponse> setDuty(
-            @PathVariable Long id,
+            @PathVariable("id") Long id,
             @RequestParam boolean onDuty,
             @RequestParam(defaultValue = "1") int maxOrders) {
         return ResponseEntity.ok(riderService.setDutyStatus(id, onDuty, maxOrders));

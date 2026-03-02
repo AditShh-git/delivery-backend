@@ -1,7 +1,9 @@
 package com.delivery.dto.request;
 
+import com.delivery.entity.DeliveryModel;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -19,15 +21,14 @@ public record CreateCompanyRequest(
         @Email
         String email,
 
+        @NotNull
+        DeliveryModel deliveryModel,
+
         String missedSlotAction,
-
         Integer maxReschedules,
-
         BigDecimal penaltyAmount,
-
         Map<String, List<String>> pickupChecklist,
 
         @NotBlank
         String productCategory
-
 ) {}

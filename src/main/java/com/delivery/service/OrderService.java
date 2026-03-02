@@ -24,6 +24,7 @@ public interface OrderService {
             OrderStatus status,
             Long companyId,
             Long riderId,
+            String zone,
             LocalDate startDate,
             LocalDate endDate,
             Pageable pageable

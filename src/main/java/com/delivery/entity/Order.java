@@ -90,6 +90,11 @@ public class Order {
     @Column(nullable = false)
     private String deliveryAddress;
 
+    @Column(nullable = false)
+    private String zone;   // stores pincode
+
+    private String landmark; // optional
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "items", columnDefinition = "jsonb")
     private List<OrderItem> items;

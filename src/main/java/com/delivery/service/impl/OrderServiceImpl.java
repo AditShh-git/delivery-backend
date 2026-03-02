@@ -9,6 +9,7 @@ import com.delivery.repository.*;
 import com.delivery.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Slf4j
 @Service
@@ -29,12 +31,15 @@ public class OrderServiceImpl implements OrderService {
     private final CompanyRepository companyRepository;
     private final CompanyPolicyRepository companyPolicyRepository;
     private final AttemptHistoryRepository attemptHistoryRepository;
+    private final ZoneRepository     zoneRepository;
 
     // ─── CREATE ────────────────────────────────────────────────────────────
 
     @Override
     @Transactional
+    @CacheEvict(value = "adminDashboard", allEntries = true)
     public OrderResponse createOrder(Long customerId, CreateOrderRequest request) {
+
         log.info("Creating order — customerId: {}, companyId: {}",
                 customerId, request.companyId());
 
@@ -44,80 +49,55 @@ public class OrderServiceImpl implements OrderService {
         Company company = companyRepository.findById(request.companyId())
                 .orElseThrow(() -> new ResourceNotFoundException("Company", request.companyId()));
 
-        // ── Enforce slot rules based on the company's delivery model ─────────
-        //
-        // Your existing slot system (slotLabel, slotDate, SlotCapacity) stays 100% as-is.
-        // DeliveryModel just controls whether slot is required, optional, or forbidden.
-        //
-        // INSTANT       → NO slot. Order dispatched immediately. 10-min delivery.
-        // PARCEL        → NO slot. Rider carries bulk sheet. Company just needs delivery date.
-        // SCHEDULED     → slot REQUIRED. Customer picks date + time window (9AM-12, 12PM-3, 3PM-6).
-        //                  Can book BEFORE delivery day (e.g. order Friday for next Tuesday 3PM-6PM slot)
-        //                  OR on delivery day morning (WhatsApp webhook fills it in on the day)
-        // PICKUP_RETURN → slot REQUIRED if customer scheduling, none if admin bulk-assigns via RunSheet.
+        // ── Zone (Pincode) Validation ─────────────────────────────────────────
+        Zone zone = zoneRepository
+                .findByNameAndIsActiveTrue(request.pincode())
+                .orElseThrow(() ->
+                        new ApiException("Service not available for pincode: " + request.pincode()));
 
+        // ── Slot Rules ─────────────────────────────────────────────────────────
         DeliveryModel model = company.getDeliveryModel();
 
         switch (model) {
-
             case INSTANT -> {
-                // Grocery / pharmacy / 10-min quick commerce.
-                // Slot fields must be null — we dispatch a rider right now, not at a future time.
                 if (request.slotLabel() != null || request.slotDate() != null) {
                     throw new ApiException(
-                            "INSTANT orders do not use slot booking. " +
-                                    "Remove slotLabel and slotDate from your request.");
+                            "INSTANT orders do not use slot booking.");
                 }
             }
 
             case PARCEL -> {
-                // Clothes, documents, packages — Delhivery/courier style.
-                // Rider carries 50 orders per day on a RunSheet.
-                // No time window — customer just knows it arrives on a given date.
                 if (request.slotLabel() != null) {
                     throw new ApiException(
-                            "PARCEL orders do not use time-window slots. " +
-                                    "Remove slotLabel. Only slotDate is accepted (optional).");
+                            "PARCEL orders do not use time-window slots.");
                 }
-                // slotDate is optional for PARCEL — no error if absent
             }
 
             case SCHEDULED -> {
-                // Electronics, furniture, OPEN_BOX — Vijay Sales / Croma style.
-                // Customer MUST have a confirmed time window so someone is home.
-                //
-                // Two valid scenarios:
-                //   1. Client pre-books the slot at order creation (slotDate + slotLabel both set)
-                //      e.g. order placed Monday for Friday 3PM-6PM delivery
-                //   2. Client creates order without slot → WhatsApp confirmation flow runs
-                //      → customer picks slot on the day via WhatsApp webhook
-                //      (your existing ConfirmationScheduler + WhatsAppWebhookController handles this)
-                //
-                // Invalid: slotDate set but slotLabel missing (date without time window is useless)
                 if (request.slotDate() != null && request.slotLabel() == null) {
                     throw new ApiException(
-                            "SCHEDULED orders require a time window (slotLabel) when slotDate is provided. " +
-                                    "Example: slotLabel='3PM-6PM'. " +
-                                    "Or omit both and the WhatsApp confirmation flow will collect the slot.");
+                            "SCHEDULED orders require slotLabel when slotDate is provided.");
                 }
             }
 
             case PICKUP_RETURN -> {
-                // Customer return / reverse logistics.
-                // Same slot rules as SCHEDULED when scheduling a pickup.
                 if (request.slotDate() != null && request.slotLabel() == null) {
                     throw new ApiException(
-                            "When scheduling a PICKUP_RETURN, both slotDate and slotLabel are required.");
+                            "PICKUP_RETURN requires slotLabel when slotDate is provided.");
                 }
             }
         }
 
-        // ── Build the order ───────────────────────────────────────────────────
-
+        // ── Build Order ───────────────────────────────────────────────────────
         Order order = new Order();
         order.setCustomer(customer);
         order.setCompany(company);
         order.setDeliveryAddress(request.deliveryAddress());
+
+        // Zone system
+        order.setZone(zone.getName());           // pincode
+        order.setLandmark(request.landmark());   // optional
+
         order.setItems(request.items());
         order.setOrderType(request.orderType());
         order.setDeliveryType(request.deliveryType());
@@ -127,25 +107,28 @@ public class OrderServiceImpl implements OrderService {
         order.setProductCategory(request.productCategory());
         order.setCallBeforeArrival(
                 request.callBeforeArrival() != null && request.callBeforeArrival());
+
         order.setStatus(OrderStatus.CREATED);
         order.setAttemptCount(0);
 
-        // ── SLA deadline — different per model ───────────────────────────────
+        // ── SLA ───────────────────────────────────────────────────────────────
         OffsetDateTime deadline = switch (model) {
-            case INSTANT       -> OffsetDateTime.now().plusMinutes(30);  // 30 min hard SLA
-            case PARCEL        -> OffsetDateTime.now().plusHours(48);    // 48 hrs
-            case SCHEDULED     -> OffsetDateTime.now().plusHours(24);    // 24 hrs (slot window is the real SLA)
-            case PICKUP_RETURN -> OffsetDateTime.now().plusHours(48);    // 48 hrs
+            case INSTANT       -> OffsetDateTime.now().plusMinutes(30);
+            case PARCEL        -> OffsetDateTime.now().plusHours(48);
+            case SCHEDULED     -> OffsetDateTime.now().plusHours(24);
+            case PICKUP_RETURN -> OffsetDateTime.now().plusHours(48);
         };
+
         order.setSlaDeadline(deadline);
         order.setSlaBreached(false);
 
         Order saved = orderRepository.save(order);
-        log.info("Order created — id: {}, deliveryModel: {}", saved.getId(), model);
+
+        log.info("Order created — id: {}, deliveryModel: {}, zone: {}",
+                saved.getId(), model, saved.getZone());
+
         return OrderResponse.from(saved);
     }
-
-    // ─── ASSIGN RIDER ──────────────────────────────────────────────────────
 
     @Override
     @Transactional
@@ -158,7 +141,6 @@ public class OrderServiceImpl implements OrderService {
 
         Order order = findOrderById(orderId);
 
-        // Allow assignment from CONFIRMED, FAILED, or CREATED
         if (order.getStatus() != OrderStatus.CONFIRMED
                 && order.getStatus() != OrderStatus.FAILED
                 && order.getStatus() != OrderStatus.CREATED) {
@@ -171,12 +153,12 @@ public class OrderServiceImpl implements OrderService {
                 .orElseThrow(() ->
                         new ResourceNotFoundException("Rider", request.riderId()));
 
-        // Capacity check (uses activeOrders + model capacity)
+        // Capacity check
         if (!rider.canAcceptOrder()) {
             throw new ApiException("Rider is not available: " + request.riderId());
         }
 
-        // Multi-tenant safety check
+        // Multi-tenant safety
         if (rider.getCompany() == null
                 || !rider.getCompany().getId()
                 .equals(order.getCompany().getId())) {
@@ -187,13 +169,22 @@ public class OrderServiceImpl implements OrderService {
                             + order.getCompany().getId());
         }
 
-        // If reassigning after failure, reset attempts
+        // ── Zone Enforcement (Hard Boundary) ─────────────────────────────
+        if (!order.getZone().equals(rider.getZone())) {
+            throw new ApiException(
+                    "Rider " + rider.getId()
+                            + " belongs to zone " + rider.getZone()
+                            + " and cannot be assigned to order in zone "
+                            + order.getZone());
+        }
+
+        // Reset attempt count if reassigning
         if (order.getStatus() == OrderStatus.FAILED) {
             log.info("Resetting attempt count for order {}", orderId);
             order.setAttemptCount(0);
         }
 
-        // Release old rider (important: decrement counter)
+        // Release old rider
         if (order.getRider() != null) {
             order.getRider().decrementActiveOrders();
         }
@@ -202,7 +193,6 @@ public class OrderServiceImpl implements OrderService {
         order.setRider(rider);
         order.setStatus(OrderStatus.ASSIGNED);
 
-        // Increment capacity counter (auto-syncs isAvailable internally)
         rider.incrementActiveOrders();
 
         log.info("Rider {} assigned to order {}", request.riderId(), orderId);
@@ -214,6 +204,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "adminDashboard", allEntries = true)
     public OrderResponse updateStatus(Long orderId,
                                       UpdateStatusRequest request,
                                       Long userId,
@@ -397,13 +388,13 @@ public class OrderServiceImpl implements OrderService {
         if (startDate != null) {
             spec = spec.and((root, query, cb) ->
                     cb.greaterThanOrEqualTo(root.get("createdAt"),
-                            startDate.atStartOfDay()));
+                            startDate.atStartOfDay().atOffset(ZoneOffset.UTC)));
         }
 
         if (endDate != null) {
             spec = spec.and((root, query, cb) ->
                     cb.lessThanOrEqualTo(root.get("createdAt"),
-                            endDate.atTime(23, 59, 59)));
+                            endDate.atTime(23, 59, 59).atOffset(ZoneOffset.UTC)));
         }
 
         return attemptHistoryRepository
@@ -541,12 +532,14 @@ public class OrderServiceImpl implements OrderService {
     // ─── GET ORDERS ────────────────────────────────────────────────────────
 
     @Override
+    @Transactional(readOnly = true)
     public Page<OrderResponse> getOrders(
             Long userId,
             String role,
             OrderStatus status,
             Long companyId,
             Long riderId,
+            String zone,
             LocalDate startDate,
             LocalDate endDate,
             Pageable pageable) {
@@ -592,13 +585,18 @@ public class OrderServiceImpl implements OrderService {
             spec = spec.and((root, query, cb) ->
                     cb.equal(root.get("rider").get("id"), riderId));
 
+        if (zone != null && !zone.isBlank())
+            spec = spec.and((root, query, cb) ->
+                    cb.equal(root.get("zone"), zone));
+
         if (startDate != null)
             spec = spec.and((root, query, cb) ->
-                    cb.greaterThanOrEqualTo(root.get("createdAt"), startDate.atStartOfDay()));
+                    cb.greaterThanOrEqualTo(root.get("createdAt"), startDate.atStartOfDay().atOffset(ZoneOffset.UTC)));
 
         if (endDate != null)
             spec = spec.and((root, query, cb) ->
-                    cb.lessThanOrEqualTo(root.get("createdAt"), endDate.atTime(23, 59, 59)));
+                    cb.lessThanOrEqualTo(root.get("createdAt"), endDate.atTime(23, 59, 59).atOffset(ZoneOffset.UTC)));
+
 
         return orderRepository.findAll(spec, pageable).map(OrderResponse::from);
     }

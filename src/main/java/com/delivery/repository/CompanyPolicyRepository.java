@@ -25,4 +25,6 @@ public interface CompanyPolicyRepository extends JpaRepository<CompanyPolicy, Lo
     );
 
     List<CompanyPolicy> findByCompanyId(Long companyId);
+
+    void deleteByCompanyId(Long companyId);
 }

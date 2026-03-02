@@ -23,15 +23,8 @@ public record CreateOrderRequest(
         DeliveryType deliveryType,      // STANDARD | OPEN_BOX — null for PICKUP
 
         // ── Slot ─────────────────────────────────────────────────────────
-        // @NotBlank / @NotNull removed — slot is not required for all delivery models.
-        // Rules enforced in OrderServiceImpl based on company.deliveryModel:
-        //   INSTANT       → both null  (no slot, dispatch immediately)
-        //   PARCEL        → both null  (no time window — rider carries bulk sheet)
-        //   SCHEDULED     → both required (customer picks date + time window)
-        //   PICKUP_RETURN → both required if booking slot, both null if admin-assigned
-        String slotLabel,               // "9AM-12PM" | "12PM-3PM" | "3PM-6PM" | null
-
-        LocalDate slotDate,             // null for INSTANT/PARCEL — required for SCHEDULED
+        String slotLabel,
+        LocalDate slotDate,
 
         @NotBlank
         String productCategory,
@@ -39,21 +32,32 @@ public record CreateOrderRequest(
         @NotBlank
         String deliveryAddress,
 
+        // ── Zone System ───────────────────────────────────────────────────
+        @NotBlank
+        String pincode,      // REQUIRED — system boundary (stored in orders.zone)
+
+        String landmark,     // OPTIONAL — display only
+
         List<OrderItem> items,
 
         Boolean callBeforeArrival
 
 ) {
-    // Only structural cross-field rules that don't need a DB lookup live here.
-    // Slot rules depend on company.deliveryModel which requires a DB call — handled in service.
+
     public CreateOrderRequest {
+
         if (orderType == OrderType.DELIVERY && deliveryType == null) {
             throw new IllegalArgumentException(
                     "deliveryType is required for DELIVERY orders (STANDARD or OPEN_BOX).");
         }
+
         if (orderType == OrderType.PICKUP && deliveryType != null) {
             throw new IllegalArgumentException(
                     "deliveryType must be null for PICKUP orders.");
+        }
+
+        if (pincode == null || pincode.isBlank()) {
+            throw new IllegalArgumentException("Pincode is required.");
         }
     }
 }

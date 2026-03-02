@@ -4,7 +4,9 @@ import com.delivery.dto.request.LoginRequest;
 import com.delivery.dto.request.SignupRequest;
 import com.delivery.dto.response.AuthResponse;
 import com.delivery.entity.Company;
+import com.delivery.entity.CompanyStatus;
 import com.delivery.entity.Role;
+import com.delivery.entity.User;
 import com.delivery.exception.ApiException;
 import com.delivery.exception.EmailAlreadyExistsException;
 import com.delivery.repository.*;
@@ -25,76 +27,73 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
-    private final UserRepository    userRepository;
-    private final RoleRepository    roleRepository;
+    private final UserRepository userRepository;
+    private final RoleRepository roleRepository;
     private final CompanyRepository companyRepository;
-    private final PasswordEncoder   passwordEncoder;
+    private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authManager;
-    private final JwtUtils          jwtUtils;
+    private final JwtUtils jwtUtils;
 
     @Override
     @Transactional
     public AuthResponse signup(SignupRequest request) {
+
         log.info("Signup attempt — email: {}, role: {}", request.email(), request.role());
 
         if (userRepository.existsByEmail(request.email())) {
-            log.warn("Signup failed — email already exists: {}", request.email());
             throw new EmailAlreadyExistsException(request.email());
         }
 
         if (userRepository.existsByPhone(request.phone())) {
-            log.warn("Signup failed — phone already exists: {}", request.phone());
             throw new ApiException("Phone already registered: " + request.phone());
         }
 
-        if ("ADMIN".equalsIgnoreCase(request.role())) {
-            log.warn("Signup blocked — ADMIN self-registration attempt by: {}", request.email());
+        String roleName = request.role().toUpperCase();
+
+        if (Role.ADMIN.equals(roleName)) {
             throw new ApiException("Cannot self-register as ADMIN");
         }
 
-        Role role = roleRepository.findByName(request.role().toUpperCase())
-                .orElseThrow(() -> {
-                    log.warn("Signup failed — role not found: {}", request.role());
-                    return new ApiException("Role not found: " + request.role());
-                });
+        if (Role.RIDER.equals(roleName)) {
+            throw new ApiException("Riders must be created by a company or admin");
+        }
 
-        com.delivery.entity.User user = new com.delivery.entity.User();
-        user.setEmail(request.email());
+        Role role = roleRepository.findByName(roleName)
+                .orElseThrow(() -> new ApiException("Role not found: " + roleName));
+
+        User user = new User();
+        user.setEmail(request.email().trim().toLowerCase());
         user.setPassword(passwordEncoder.encode(request.password()));
-        user.setFullName(request.fullName());
-        user.setPhone(request.phone());
+        user.setFullName(request.fullName().trim());
+        user.setPhone(request.phone().trim());
         user.getRoles().add(role);
 
-        if ("COMPANY".equalsIgnoreCase(request.role())) {
+        // ── COMPANY SELF-SIGNUP FLOW ───────────────────────────────────
+        if (Role.COMPANY.equals(roleName)) {
 
-            String normalizedEmail = request.email().trim().toLowerCase();
-            String normalizedPhone = request.phone().trim();
+            String normalizedEmail = user.getEmail();
+            String normalizedPhone = user.getPhone();
 
             if (companyRepository.existsByEmail(normalizedEmail)) {
                 throw new ApiException("Company already registered with this email");
             }
 
             Company company = new Company();
-            company.setName(request.fullName().trim() + " Company");
+            company.setName(user.getFullName() + " Company");
             company.setEmail(normalizedEmail);
             company.setContact(normalizedPhone);
-            // deliveryModel default remains SCHEDULED
+            company.setStatus(CompanyStatus.PENDING); // Explicit
 
             companyRepository.save(company);
             user.setCompany(company);
 
-            log.info("Company profile created for: {}", request.email());
+            log.info("Company created with PENDING status for {}", normalizedEmail);
         }
 
         userRepository.save(user);
-        log.info("User saved — email: {}, role: {}", user.getEmail(), role.getName());
 
-        if ("RIDER".equalsIgnoreCase(request.role())) {
-            throw new ApiException("Riders must be created by a company or admin");
-        }
-
-        log.info("Signup successful — email: {}, role: {}", user.getEmail(), role.getName());
-        return generateAuthResponse(user, "Signup successful — welcome " + user.getFullName());
+        return generateAuthResponse(user,
+                "Signup successful — welcome " + user.getFullName());
     }
 
     @Override
@@ -105,9 +104,7 @@ public class AuthServiceImpl implements AuthService {
             authManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
                             request.email(),
-                            request.password()
-                    )
-            );
+                            request.password()));
         } catch (BadCredentialsException e) {
             log.warn("Login failed — bad credentials for: {}", request.email());
             throw new ApiException("Invalid email or password");
@@ -124,6 +121,26 @@ public class AuthServiceImpl implements AuthService {
                     log.warn("Login failed — user not found: {}", request.email());
                     return new ApiException("User not found: " + request.email());
                 });
+
+        // ── COMPANY STATUS GATE ────────────────────────────────────────────
+        // Block login if the company account has not been approved by admin.
+        // This prevents PENDING or SUSPENDED companies from obtaining a JWT.
+        boolean isCompanyUser = user.getRoles().stream()
+                .anyMatch(r -> r.is(Role.COMPANY));
+
+        if (isCompanyUser) {
+            Company company = user.getCompany();
+            if (company == null) {
+                log.warn("Login blocked — COMPANY user {} has no company profile", user.getEmail());
+                throw new ApiException("No company profile linked to this account. Contact admin.");
+            }
+            if (company.getStatus() != CompanyStatus.ACTIVE) {
+                log.warn("Login blocked — company {} status is {}", company.getId(), company.getStatus());
+                throw new ApiException(
+                        "Company account is not active. Current status: " + company.getStatus()
+                                + ". Please contact admin for approval.");
+            }
+        }
 
         log.info("Login successful — email: {}, roles: {}",
                 user.getEmail(),

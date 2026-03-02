@@ -32,6 +32,10 @@ public class Company {
     @Enumerated(EnumType.STRING)
     private DeliveryModel deliveryModel = DeliveryModel.SCHEDULED;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private CompanyStatus status = CompanyStatus.PENDING;
+
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 
