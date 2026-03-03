@@ -23,73 +23,66 @@ import java.util.List;
 @PreAuthorize("hasRole('ADMIN')")
 public class AdminController {
 
-    private final AdminService adminService;
-    private final CompanyService companyService;
+        private final AdminService adminService;
+        private final CompanyService companyService;
 
-    @GetMapping("/riders")
-    public ResponseEntity<Page<RiderPerformanceResponse>> getRiders(
-            @RequestParam(name = "zone", required = false) String zone,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-            LocalDate startDate,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-            LocalDate endDate,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size
-    ) {
-        return ResponseEntity.ok(
-                adminService.getRiderPerformance(zone, startDate, endDate, page, size)
-        );
-    }
+        @GetMapping("/riders")
+        public ResponseEntity<Page<RiderPerformanceResponse>> getRiders(
+                        @RequestParam(name = "zone", required = false) String zone,
+                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+                        @RequestParam(defaultValue = "0") int page,
+                        @RequestParam(defaultValue = "10") int size) {
+                return ResponseEntity.ok(
+                                adminService.getRiderPerformance(zone, startDate, endDate, page, size));
+        }
 
-    @GetMapping("/reports/failed-orders")
-    public ResponseEntity<List<FailedOrdersReportResponse>> getFailedOrdersReport(
-            @RequestParam(name = "zone", required = false) String zone,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-            LocalDate startDate,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-            LocalDate endDate
-    ) {
-        return ResponseEntity.ok(
-                adminService.getFailedOrdersReport(zone, startDate, endDate)
-        );
-    }
+        @GetMapping("/reports/failed-orders")
+        public ResponseEntity<List<FailedOrdersReportResponse>> getFailedOrdersReport(
+                        @RequestParam(name = "zone", required = false) String zone,
+                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+                return ResponseEntity.ok(
+                                adminService.getFailedOrdersReport(zone, startDate, endDate));
+        }
 
-    @GetMapping("/reports/rider-stats")
-    public ResponseEntity<List<RiderStatsReportResponse>> getRiderStatsReport(
-            @RequestParam(name = "zone", required = false) String zone,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-            LocalDate startDate,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-            LocalDate endDate
-    ) {
-        return ResponseEntity.ok(
-                adminService.getRiderStatsReport(zone, startDate, endDate)
-        );
-    }
+        @GetMapping("/reports/rider-stats")
+        public ResponseEntity<List<RiderStatsReportResponse>> getRiderStatsReport(
+                        @RequestParam(name = "zone", required = false) String zone,
+                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+                return ResponseEntity.ok(
+                                adminService.getRiderStatsReport(zone, startDate, endDate));
+        }
 
-    @GetMapping("/pending")
-    public ResponseEntity<Page<CompanyResponse>> getPendingCompanies(
-            @RequestParam(name = "page", defaultValue = "0") int page,
-            @RequestParam(name = "size", defaultValue = "10") int size
-    ) {
-        return ResponseEntity.ok(
-                companyService.getCompanies(
-                        page,
-                        size,
-                        CompanyStatus.PENDING,
-                        null
-                )
-        );
-    }
+        // ── Analytics: Order Trend ─────────────────────────────────────────────────
+        @GetMapping("/reports/order-trend")
+        public ResponseEntity<List<OrderTrendResponse>> getOrderTrend(
+                        @RequestParam(defaultValue = "day") String granularity,
+                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+                return ResponseEntity.ok(
+                                adminService.getOrderTrend(granularity, startDate, endDate));
+        }
 
-    @GetMapping("/dashboard")
-    public ResponseEntity<AdminDashboardResponse> getDashboard() {
-        return ResponseEntity.ok(adminService.getDashboard());
-    }
+        // ── Analytics: Zone Heatmap ────────────────────────────────────────────────
+        @GetMapping("/reports/zone-heatmap")
+        public ResponseEntity<List<ZoneHeatmapResponse>> getZoneHeatmap() {
+                return ResponseEntity.ok(adminService.getZoneHeatmap());
+        }
+
+        // ── Company & Dashboard ────────────────────────────────────────────────────
+        @GetMapping("/pending")
+        public ResponseEntity<Page<CompanyResponse>> getPendingCompanies(
+                        @RequestParam(name = "status", defaultValue = "PENDING") CompanyStatus status,
+                        @RequestParam(name = "page", defaultValue = "0") int page,
+                        @RequestParam(name = "size", defaultValue = "10") int size) {
+                return ResponseEntity.ok(
+                                companyService.getCompanies(page, size, status, null));
+        }
+
+        @GetMapping("/dashboard")
+        public ResponseEntity<AdminDashboardResponse> getDashboard() {
+                return ResponseEntity.ok(adminService.getDashboard());
+        }
 }

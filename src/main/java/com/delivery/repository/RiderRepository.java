@@ -105,4 +105,7 @@ public interface RiderRepository extends JpaRepository<Rider, Long> {
                 FROM riders
             """, nativeQuery = true)
     RiderKpiProjection getRiderKpis();
+
+    // ── Week 6 Prep ──────────────────────────────────────────────────────────
+    List<Rider> findByZoneAndIsOnDutyTrue(String zone);
 }

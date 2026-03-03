@@ -1,5 +1,6 @@
 package com.delivery.utils;
 
+import com.delivery.exception.ApiException;
 import com.delivery.exception.ResourceNotFoundException;
 import com.delivery.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,6 @@ public class SecurityUtils {
                 .filter(a -> a.startsWith("ROLE_"))
                 .map(a -> a.substring(5))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("No role found"));
+                .orElseThrow(() -> new ApiException("Authenticated user has no role assigned"));
     }
 }

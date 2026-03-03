@@ -5,6 +5,7 @@ import com.delivery.dto.request.UpdatePasswordRequest;
 import com.delivery.dto.request.UpdateRiderRequest;
 import com.delivery.dto.response.RiderResponse;
 import com.delivery.service.RiderService;
+import com.delivery.exception.ApiException;
 import com.delivery.utils.SecurityUtils;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ public class RiderController {
 
         Long userId = securityUtils.extractUserId(auth);
         String role = securityUtils.extractRole(auth);
+        log.info("POST /api/company/riders — userId={}, role={}, email={}", userId, role, request.email());
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)
@@ -47,6 +49,7 @@ public class RiderController {
 
         Long userId = securityUtils.extractUserId(auth);
         String role = securityUtils.extractRole(auth);
+        log.info("PATCH /api/company/riders/{} — userId={}, role={}", id, userId, role);
 
         return ResponseEntity.ok(
                 riderService.updateRider(id, request, userId, role));
@@ -61,6 +64,7 @@ public class RiderController {
 
         Long userId = securityUtils.extractUserId(auth);
         String role = securityUtils.extractRole(auth);
+        log.info("PATCH /api/company/riders/{}/password — userId={}, role={}", id, userId, role);
 
         riderService.updatePassword(id, request, userId, role);
 
@@ -68,11 +72,22 @@ public class RiderController {
     }
 
     @PatchMapping("/riders/{id}/duty")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPANY','RIDER')")
+    @PreAuthorize("hasRole('COMPANY') or hasRole('ADMIN')")
     public ResponseEntity<RiderResponse> setDuty(
             @PathVariable("id") Long id,
             @RequestParam boolean onDuty,
-            @RequestParam(defaultValue = "1") int maxOrders) {
-        return ResponseEntity.ok(riderService.setDutyStatus(id, onDuty, maxOrders));
+            @RequestParam(defaultValue = "1") int maxOrders,
+            Authentication auth) {
+
+        if (maxOrders < 1) {
+            throw new ApiException("maxOrders must be at least 1");
+        }
+
+        Long userId = securityUtils.extractUserId(auth);
+        String role = securityUtils.extractRole(auth);
+        log.info("PATCH /api/company/riders/{}/duty — onDuty={}, maxOrders={}, userId={}, role={}", id, onDuty,
+                maxOrders, userId, role);
+
+        return ResponseEntity.ok(riderService.setDutyStatus(id, onDuty, maxOrders, userId, role));
     }
 }

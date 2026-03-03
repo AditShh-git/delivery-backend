@@ -10,6 +10,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
 
@@ -65,6 +66,29 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", ex.getMessage());
     }
 
+    /**
+     * Catches JSON parse failures — malformed JSON, bad enum values, and
+     * IllegalArgumentExceptions thrown from record compact constructors
+     * (e.g. cross-field validation like "pincode is required").
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleNotReadable(HttpMessageNotReadableException ex) {
+
+        // Walk to the deepest cause to get the real validation message
+        Throwable root = ex;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+
+        String message = (root.getMessage() != null && !root.getMessage().isBlank())
+                ? root.getMessage()
+                : "Malformed or unreadable JSON request body";
+
+        log.warn("HTTP message not readable: {}", message);
+
+        return buildResponse(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", message);
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
 
@@ -81,22 +105,19 @@ public class GlobalExceptionHandler {
         return buildResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "INTERNAL_SERVER_ERROR",
-                "Something went wrong"
-        );
+                "Something went wrong");
     }
 
     private ResponseEntity<ErrorResponse> buildResponse(
             HttpStatus status,
             String code,
-            String message
-    ) {
+            String message) {
 
         ErrorResponse error = new ErrorResponse(
                 code,
                 message,
                 status.value(),
-                OffsetDateTime.now()
-        );
+                OffsetDateTime.now());
 
         return new ResponseEntity<>(error, status);
     }

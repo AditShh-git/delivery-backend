@@ -7,19 +7,20 @@ import com.delivery.dto.response.RiderResponse;
 
 public interface RiderService {
     RiderResponse createRider(CreateRiderRequest request,
-                              Long creatorUserId,
-                              String creatorRole);
+            Long creatorUserId,
+            String creatorRole);
 
     RiderResponse updateRider(Long riderId,
-                              UpdateRiderRequest request,
-                              Long userId,
-                              String role);
+            UpdateRiderRequest request,
+            Long userId,
+            String role);
 
     void updatePassword(Long riderId,
-                        UpdatePasswordRequest request,
-                        Long userId,
-                        String role);
+            UpdatePasswordRequest request,
+            Long userId,
+            String role);
 
-    RiderResponse setDutyStatus(Long riderId, boolean onDuty, int maxConcurrentOrders);
+    RiderResponse setDutyStatus(Long riderId, boolean onDuty, int maxConcurrentOrders,
+            Long callerUserId, String callerRole);
 
 }

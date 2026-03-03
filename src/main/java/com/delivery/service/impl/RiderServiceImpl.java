@@ -220,25 +220,38 @@ public class RiderServiceImpl implements RiderService {
 
     // ─── SET DUTY STATUS ───────────────────────────────────────────────────
     // Called by PATCH /api/company/riders/{id}/duty?onDuty=true&maxOrders=1
-    // This is the ONLY thing admin needs to do per rider per day.
-    // Everything else (capacity, availability) is managed automatically.
+    // Only ADMIN or the rider's own COMPANY may call this.
 
     @Override
     @Transactional
     @CacheEvict(value = "adminDashboard", allEntries = true)
     public RiderResponse setDutyStatus(Long riderId,
             boolean onDuty,
-            int maxConcurrentOrders) {
+            int maxConcurrentOrders,
+            Long callerUserId,
+            String callerRole) {
 
         Rider rider = riderRepository.findById(riderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Rider", riderId));
+
+        // Ownership guard: COMPANY users may only manage riders within their company
+        if ("COMPANY".equals(callerRole)) {
+            User companyUser = userRepository.findById(callerUserId)
+                    .orElseThrow(() -> new ResourceNotFoundException("User", callerUserId));
+
+            Company callerCompany = companyUser.getCompany();
+            if (callerCompany == null || !rider.getCompany().getId().equals(callerCompany.getId())) {
+                throw new ApiException("You can only manage riders within your own company.");
+            }
+        }
 
         rider.setIsOnDuty(onDuty);
         rider.setMaxConcurrentOrders(maxConcurrentOrders);
 
         if (!onDuty) {
-            // Rider going off duty — reset counters, mark unavailable
-            rider.setActiveOrderCount(0);
+            // Rider going off duty — mark unavailable, but do NOT reset activeOrderCount:
+            // orders already in-flight are still being handled; the count decrements
+            // naturally as each order completes.
             rider.setIsAvailable(false);
             log.info("Rider {} is now OFF DUTY", riderId);
         } else {

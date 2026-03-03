@@ -26,3 +26,8 @@ Thumbs.db
 # Environment / Secrets
 # ===============================
 .env
+
+# ===============================
+# Compiled Java Classes
+# ===============================
+*.class

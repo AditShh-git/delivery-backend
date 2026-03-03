@@ -8,19 +8,15 @@ import org.hibernate.type.SqlTypes;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 
 @Entity
-@Table(
-        name = "orders",
-        indexes = {
-                @Index(name = "idx_orders_status",      columnList = "status"),
-                @Index(name = "idx_orders_company_id",  columnList = "company_id"),
-                @Index(name = "idx_orders_rider_id",    columnList = "rider_id"),
-                @Index(name = "idx_orders_created_at",  columnList = "created_at"),
-                @Index(name = "idx_orders_slot_date",   columnList = "slot_date")
-        }
-)
+@Table(name = "orders", indexes = {
+        @Index(name = "idx_orders_status", columnList = "status"),
+        @Index(name = "idx_orders_company_id", columnList = "company_id"),
+        @Index(name = "idx_orders_rider_id", columnList = "rider_id"),
+        @Index(name = "idx_orders_created_at", columnList = "created_at"),
+        @Index(name = "idx_orders_slot_date", columnList = "slot_date")
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -55,21 +51,21 @@ public class Order {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "order_type", nullable = false)
-    private OrderType orderType;                          // DELIVERY | PICKUP
+    private OrderType orderType; // DELIVERY | PICKUP
 
     @Enumerated(EnumType.STRING)
     @Column(name = "delivery_type")
-    private DeliveryType deliveryType;                    // STANDARD | OPEN_BOX — null for PICKUP orders
+    private DeliveryType deliveryType; // STANDARD | OPEN_BOX — null for PICKUP orders
 
     // ── Ecom integration ────────────────────────────────────────────────
 
     @Column(name = "external_order_id", length = 100)
-    private String externalOrderId;                       // ecom's own order ID; unique per company (enforced by DB index)
+    private String externalOrderId; // ecom's own order ID; unique per company (enforced by DB index)
 
     // ── Slot ────────────────────────────────────────────────────────────
 
     @Column(name = "slot_label", length = 50)
-    private String slotLabel;                             // e.g. "3PM-6PM"
+    private String slotLabel; // e.g. "3PM-6PM"
 
     @Column(name = "slot_date")
     private LocalDate slotDate;
@@ -83,7 +79,7 @@ public class Order {
     // ── Product ─────────────────────────────────────────────────────────
 
     @Column(name = "product_category", length = 100)
-    private String productCategory;                       // drives pickup checklist lookup
+    private String productCategory; // drives pickup checklist lookup
 
     // ── Delivery details ────────────────────────────────────────────────
 
@@ -91,7 +87,7 @@ public class Order {
     private String deliveryAddress;
 
     @Column(nullable = false)
-    private String zone;   // stores pincode
+    private String zone; // stores pincode
 
     private String landmark; // optional
 
@@ -102,12 +98,12 @@ public class Order {
     // ── UX flags ────────────────────────────────────────────────────────
 
     @Column(name = "call_before_arrival", nullable = false)
-    private Boolean callBeforeArrival = false;            // rider prompted to call 15 min before arrival
+    private Boolean callBeforeArrival = false; // rider prompted to call 15 min before arrival
 
     // ── Attempt tracking ────────────────────────────────────────────────
 
     @Column(nullable = false)
-    private Integer attemptCount = 0;                     // changed from Short — no reason to be awkward here
+    private Integer attemptCount = 0; // changed from Short — no reason to be awkward here
 
     @Column(name = "sla_deadline")
     private OffsetDateTime slaDeadline;
@@ -133,8 +129,6 @@ public class Order {
 
     @Column(name = "auto_cancelled", nullable = false)
     private Boolean autoCancelled = false;
-
-
 
     // ── Timestamps ──────────────────────────────────────────────────────
 

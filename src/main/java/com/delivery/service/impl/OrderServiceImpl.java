@@ -25,19 +25,19 @@ import java.time.ZoneOffset;
 @RequiredArgsConstructor
 public class OrderServiceImpl implements OrderService {
 
-    private final OrderRepository   orderRepository;
-    private final UserRepository    userRepository;
-    private final RiderRepository   riderRepository;
+    private final OrderRepository orderRepository;
+    private final UserRepository userRepository;
+    private final RiderRepository riderRepository;
     private final CompanyRepository companyRepository;
     private final CompanyPolicyRepository companyPolicyRepository;
     private final AttemptHistoryRepository attemptHistoryRepository;
-    private final ZoneRepository     zoneRepository;
+    private final ZoneRepository zoneRepository;
 
     // ─── CREATE ────────────────────────────────────────────────────────────
 
     @Override
     @Transactional
-    @CacheEvict(value = "adminDashboard", allEntries = true)
+    @CacheEvict(value = { "adminDashboard", "orderTrend", "zoneHeatmap" }, allEntries = true)
     public OrderResponse createOrder(Long customerId, CreateOrderRequest request) {
 
         log.info("Creating order — customerId: {}, companyId: {}",
@@ -52,8 +52,7 @@ public class OrderServiceImpl implements OrderService {
         // ── Zone (Pincode) Validation ─────────────────────────────────────────
         Zone zone = zoneRepository
                 .findByNameAndIsActiveTrue(request.pincode())
-                .orElseThrow(() ->
-                        new ApiException("Service not available for pincode: " + request.pincode()));
+                .orElseThrow(() -> new ApiException("Service not available for pincode: " + request.pincode()));
 
         // ── Slot Rules ─────────────────────────────────────────────────────────
         DeliveryModel model = company.getDeliveryModel();
@@ -95,8 +94,8 @@ public class OrderServiceImpl implements OrderService {
         order.setDeliveryAddress(request.deliveryAddress());
 
         // Zone system
-        order.setZone(zone.getName());           // pincode
-        order.setLandmark(request.landmark());   // optional
+        order.setZone(zone.getName()); // pincode
+        order.setLandmark(request.landmark()); // optional
 
         order.setItems(request.items());
         order.setOrderType(request.orderType());
@@ -113,9 +112,9 @@ public class OrderServiceImpl implements OrderService {
 
         // ── SLA ───────────────────────────────────────────────────────────────
         OffsetDateTime deadline = switch (model) {
-            case INSTANT       -> OffsetDateTime.now().plusMinutes(30);
-            case PARCEL        -> OffsetDateTime.now().plusHours(48);
-            case SCHEDULED     -> OffsetDateTime.now().plusHours(24);
+            case INSTANT -> OffsetDateTime.now().plusMinutes(30);
+            case PARCEL -> OffsetDateTime.now().plusHours(48);
+            case SCHEDULED -> OffsetDateTime.now().plusHours(24);
             case PICKUP_RETURN -> OffsetDateTime.now().plusHours(48);
         };
 
@@ -133,8 +132,8 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponse assignRider(Long orderId,
-                                     AssignRiderRequest request,
-                                     Long adminId) {
+            AssignRiderRequest request,
+            Long adminId) {
 
         log.info("Assigning rider — orderId: {}, riderId: {}, adminId: {}",
                 orderId, request.riderId(), adminId);
@@ -150,8 +149,7 @@ public class OrderServiceImpl implements OrderService {
         }
 
         Rider rider = riderRepository.findById(request.riderId())
-                .orElseThrow(() ->
-                        new ResourceNotFoundException("Rider", request.riderId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Rider", request.riderId()));
 
         // Capacity check
         if (!rider.canAcceptOrder()) {
@@ -161,7 +159,7 @@ public class OrderServiceImpl implements OrderService {
         // Multi-tenant safety
         if (rider.getCompany() == null
                 || !rider.getCompany().getId()
-                .equals(order.getCompany().getId())) {
+                        .equals(order.getCompany().getId())) {
 
             throw new ApiException(
                     "Rider " + request.riderId()
@@ -170,7 +168,10 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // ── Zone Enforcement (Hard Boundary) ─────────────────────────────
-        if (!order.getZone().equals(rider.getZone())) {
+        // Only enforce when both sides have a zone — backward compatible
+        // with legacy orders/riders that predate the zone system.
+        if (order.getZone() != null && rider.getZone() != null
+                && !order.getZone().equals(rider.getZone())) {
             throw new ApiException(
                     "Rider " + rider.getId()
                             + " belongs to zone " + rider.getZone()
@@ -206,9 +207,9 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     @CacheEvict(value = "adminDashboard", allEntries = true)
     public OrderResponse updateStatus(Long orderId,
-                                      UpdateStatusRequest request,
-                                      Long userId,
-                                      String role) {
+            UpdateStatusRequest request,
+            Long userId,
+            String role) {
 
         log.info("Status update — orderId: {}, newStatus: {}, userId: {}, role: {}",
                 orderId, request.status(), userId, role);
@@ -235,26 +236,22 @@ public class OrderServiceImpl implements OrderService {
             policy = companyPolicyRepository
                     .findByCompanyIdAndProductCategory(
                             order.getCompany().getId(),
-                            order.getProductCategory()
-                    )
+                            order.getProductCategory())
                     .orElseThrow(() -> new ApiException(
                             "Policy not configured for company "
                                     + order.getCompany().getId()
-                                    + " | product: " + order.getProductCategory()
-                    ));
+                                    + " | product: " + order.getProductCategory()));
         } else {
             policy = companyPolicyRepository
                     .findByCompanyIdAndProductCategoryAndDeliveryType(
                             order.getCompany().getId(),
                             order.getProductCategory(),
-                            order.getDeliveryType()
-                    )
+                            order.getDeliveryType())
                     .orElseThrow(() -> new ApiException(
                             "Policy not configured for company "
                                     + order.getCompany().getId()
                                     + " | product: " + order.getProductCategory()
-                                    + " | deliveryType: " + order.getDeliveryType()
-                    ));
+                                    + " | deliveryType: " + order.getDeliveryType()));
         }
 
         int maxAttempts = policy.getMaxReschedules();
@@ -327,7 +324,6 @@ public class OrderServiceImpl implements OrderService {
 
             order.setStatus(OrderStatus.FAILED);
 
-
             if (missedSlots >= maxAttempts) {
 
                 log.error("Max missed slots reached. Auto-unassigning rider.");
@@ -346,7 +342,6 @@ public class OrderServiceImpl implements OrderService {
 
         // ── NORMAL STATUS UPDATE ────────────────────────────────────
         order.setStatus(newStatus);
-
 
         if (newStatus == OrderStatus.DELIVERED
                 || newStatus == OrderStatus.COLLECTED
@@ -376,25 +371,21 @@ public class OrderServiceImpl implements OrderService {
         Specification<AttemptHistory> spec = (root, query, cb) -> cb.conjunction();
 
         if (orderId != null) {
-            spec = spec.and((root, query, cb) ->
-                    cb.equal(root.get("order").get("id"), orderId));
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("order").get("id"), orderId));
         }
 
         if (riderId != null) {
-            spec = spec.and((root, query, cb) ->
-                    cb.equal(root.get("rider").get("id"), riderId));
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("rider").get("id"), riderId));
         }
 
         if (startDate != null) {
-            spec = spec.and((root, query, cb) ->
-                    cb.greaterThanOrEqualTo(root.get("createdAt"),
-                            startDate.atStartOfDay().atOffset(ZoneOffset.UTC)));
+            spec = spec.and((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("createdAt"),
+                    startDate.atStartOfDay().atOffset(ZoneOffset.UTC)));
         }
 
         if (endDate != null) {
-            spec = spec.and((root, query, cb) ->
-                    cb.lessThanOrEqualTo(root.get("createdAt"),
-                            endDate.atTime(23, 59, 59).atOffset(ZoneOffset.UTC)));
+            spec = spec.and((root, query, cb) -> cb.lessThanOrEqualTo(root.get("createdAt"),
+                    endDate.atTime(23, 59, 59).atOffset(ZoneOffset.UTC)));
         }
 
         return attemptHistoryRepository
@@ -413,8 +404,8 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponse forceCancel(Long orderId,
-                                     String reason,
-                                     Long adminId) {
+            String reason,
+            Long adminId) {
 
         Order order = findOrderById(orderId);
 
@@ -440,9 +431,9 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponse adminReassign(Long orderId,
-                                       Long riderId,
-                                       String reason,
-                                       Long adminId) {
+            Long riderId,
+            String reason,
+            Long adminId) {
 
         Order order = findOrderById(orderId);
 
@@ -495,18 +486,19 @@ public class OrderServiceImpl implements OrderService {
 
     // ─── ORDER-TYPE TRANSITION GUARD ───────────────────────────────────────
     //
-    // The state machine allows IN_TRANSIT → DELIVERED | COLLECTED | FAILED | DISPUTED
+    // The state machine allows IN_TRANSIT → DELIVERED | COLLECTED | FAILED |
+    // DISPUTED
     // but not every order type can reach every terminal state:
     //
-    //   PICKUP    → must end in COLLECTED, never DELIVERED
-    //   DELIVERY  → must end in DELIVERED, never COLLECTED
-    //   OPEN_BOX  → can be DISPUTED (customer rejects item on inspection)
-    //   STANDARD  → cannot be DISPUTED (no inspection step)
+    // PICKUP → must end in COLLECTED, never DELIVERED
+    // DELIVERY → must end in DELIVERED, never COLLECTED
+    // OPEN_BOX → can be DISPUTED (customer rejects item on inspection)
+    // STANDARD → cannot be DISPUTED (no inspection step)
 
     private void validateOrderTypeTransition(Order order, OrderStatus newStatus) {
 
-        OrderType     type         = order.getOrderType();
-        DeliveryType  deliveryType = order.getDeliveryType();
+        OrderType type = order.getOrderType();
+        DeliveryType deliveryType = order.getDeliveryType();
 
         // PICKUP orders end in COLLECTED — DELIVERED is not valid
         if (newStatus == OrderStatus.DELIVERED && type == OrderType.PICKUP) {
@@ -551,24 +543,23 @@ public class OrderServiceImpl implements OrderService {
         // Documenting explicitly so it stays consistent if someone adds a new case.
         switch (role) {
 
-            case "ADMIN" -> { /* no restriction */ }
+            case "ADMIN" -> {
+                /* no restriction */ }
 
             case "CUSTOMER" ->
-                    spec = spec.and((root, query, cb) ->
-                            cb.equal(root.get("customer").get("id"), userId));
+                spec = spec.and((root, query, cb) -> cb.equal(root.get("customer").get("id"), userId));
 
             case "RIDER" -> {
                 Rider rider = riderRepository.findByUserId(userId)
                         .orElseThrow(() -> new ResourceNotFoundException("Rider", userId));
-                spec = spec.and((root, query, cb) ->
-                        cb.equal(root.get("rider").get("id"), rider.getId()));
+                spec = spec.and((root, query, cb) -> cb.equal(root.get("rider").get("id"), rider.getId()));
             }
 
             case "COMPANY" -> {
                 User user = userRepository.findById(userId)
                         .orElseThrow(() -> new ResourceNotFoundException("User", userId));
-                spec = spec.and((root, query, cb) ->
-                        cb.equal(root.get("company").get("id"), user.getCompany().getId()));
+                spec = spec
+                        .and((root, query, cb) -> cb.equal(root.get("company").get("id"), user.getCompany().getId()));
             }
 
             default -> throw new ApiException("Unknown role: " + role);
@@ -578,25 +569,21 @@ public class OrderServiceImpl implements OrderService {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
 
         if (companyId != null)
-            spec = spec.and((root, query, cb) ->
-                    cb.equal(root.get("company").get("id"), companyId));
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("company").get("id"), companyId));
 
         if (riderId != null)
-            spec = spec.and((root, query, cb) ->
-                    cb.equal(root.get("rider").get("id"), riderId));
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("rider").get("id"), riderId));
 
         if (zone != null && !zone.isBlank())
-            spec = spec.and((root, query, cb) ->
-                    cb.equal(root.get("zone"), zone));
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("zone"), zone));
 
         if (startDate != null)
-            spec = spec.and((root, query, cb) ->
-                    cb.greaterThanOrEqualTo(root.get("createdAt"), startDate.atStartOfDay().atOffset(ZoneOffset.UTC)));
+            spec = spec.and((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("createdAt"),
+                    startDate.atStartOfDay().atOffset(ZoneOffset.UTC)));
 
         if (endDate != null)
-            spec = spec.and((root, query, cb) ->
-                    cb.lessThanOrEqualTo(root.get("createdAt"), endDate.atTime(23, 59, 59).atOffset(ZoneOffset.UTC)));
-
+            spec = spec.and((root, query, cb) -> cb.lessThanOrEqualTo(root.get("createdAt"),
+                    endDate.atTime(23, 59, 59).atOffset(ZoneOffset.UTC)));
 
         return orderRepository.findAll(spec, pageable).map(OrderResponse::from);
     }
@@ -614,8 +601,8 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponse cancelOrder(Long orderId,
-                                     Long userId,
-                                     String role) {
+            Long userId,
+            String role) {
 
         Order order = findOrderById(orderId);
 
@@ -635,7 +622,7 @@ public class OrderServiceImpl implements OrderService {
             throw new ApiException("Delivered/Collected orders cannot be cancelled.");
         }
 
-        //  Auto free rider if assigned
+        // Auto free rider if assigned
         if (order.getRider() != null) {
             Rider rider = order.getRider();
             rider.decrementActiveOrders();
@@ -677,14 +664,15 @@ public class OrderServiceImpl implements OrderService {
 
     private void validateAccess(Order order, Long userId, String role) {
         // FIX: role arrives WITHOUT "ROLE_" prefix from extractRole().
-        // Previous version used "ROLE_ADMIN", "ROLE_CUSTOMER" etc — those never matched.
+        // Previous version used "ROLE_ADMIN", "ROLE_CUSTOMER" etc — those never
+        // matched.
         boolean allowed = switch (role) {
 
             case "ADMIN" ->
-                    true;
+                true;
 
             case "CUSTOMER" ->
-                    order.getCustomer().getId().equals(userId);
+                order.getCustomer().getId().equals(userId);
 
             case "COMPANY" -> {
                 User user = userRepository.findById(userId)
@@ -694,8 +682,8 @@ public class OrderServiceImpl implements OrderService {
             }
 
             case "RIDER" ->
-                    order.getRider() != null
-                            && order.getRider().getUser().getId().equals(userId);
+                order.getRider() != null
+                        && order.getRider().getUser().getId().equals(userId);
 
             default -> false;
         };

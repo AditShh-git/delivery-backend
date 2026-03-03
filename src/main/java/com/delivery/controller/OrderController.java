@@ -4,8 +4,7 @@ import com.delivery.dto.request.*;
 import com.delivery.dto.response.AttemptHistoryResponse;
 import com.delivery.dto.response.OrderResponse;
 import com.delivery.entity.OrderStatus;
-import com.delivery.exception.ResourceNotFoundException;
-import com.delivery.repository.UserRepository;
+import com.delivery.utils.SecurityUtils;
 import com.delivery.service.OrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -18,11 +17,9 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.*;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
-import java.util.Objects;
 
 @Slf4j
 @RestController
@@ -31,7 +28,7 @@ import java.util.Objects;
 public class OrderController {
 
         private final OrderService orderService;
-        private final UserRepository userRepository;
+        private final SecurityUtils securityUtils;
 
         // ─── CREATE — CUSTOMER only ────────────────────────────────────────────
         @PreAuthorize("hasRole('CUSTOMER')")
@@ -40,7 +37,7 @@ public class OrderController {
                         @Valid @RequestBody CreateOrderRequest request,
                         Authentication auth) {
 
-                Long userId = extractUserId(auth);
+                Long userId = securityUtils.extractUserId(auth);
                 log.info("POST /api/orders — userId: {}", userId);
                 return ResponseEntity
                                 .status(HttpStatus.CREATED)
@@ -55,7 +52,7 @@ public class OrderController {
                         @Valid @RequestBody AssignRiderRequest request,
                         Authentication auth) {
 
-                Long adminId = extractUserId(auth);
+                Long adminId = securityUtils.extractUserId(auth);
                 log.info("POST /api/orders/{}/assign — adminId: {}", id, adminId);
                 return ResponseEntity.ok(orderService.assignRider(id, request, adminId));
         }
@@ -68,8 +65,8 @@ public class OrderController {
                         @Valid @RequestBody UpdateStatusRequest request,
                         Authentication auth) {
 
-                Long userId = extractUserId(auth);
-                String role = extractRole(auth);
+                Long userId = securityUtils.extractUserId(auth);
+                String role = securityUtils.extractRole(auth);
                 log.info("PATCH /api/orders/{}/status — userId: {}, role: {}", id, userId, role);
                 return ResponseEntity.ok(orderService.updateStatus(id, request, userId, role));
         }
@@ -87,8 +84,8 @@ public class OrderController {
                         @RequestParam(name = "zone", required = false) String zone,
                         @RequestParam(name = "startDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
                         @RequestParam(name = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-                Long userId = extractUserId(auth);
-                String role = extractRole(auth);
+                Long userId = securityUtils.extractUserId(auth);
+                String role = securityUtils.extractRole(auth);
 
                 Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
 
@@ -104,8 +101,8 @@ public class OrderController {
                         @PathVariable("id") Long id,
                         Authentication auth) {
 
-                Long userId = extractUserId(auth);
-                String role = extractRole(auth);
+                Long userId = securityUtils.extractUserId(auth);
+                String role = securityUtils.extractRole(auth);
                 log.info("GET /api/orders/{} — userId: {}, role: {}", id, userId, role);
                 return ResponseEntity.ok(orderService.getOrderById(id, userId, role));
         }
@@ -116,8 +113,8 @@ public class OrderController {
                         @PathVariable("id") Long id,
                         Authentication auth) {
 
-                Long userId = extractUserId(auth);
-                String role = extractRole(auth);
+                Long userId = securityUtils.extractUserId(auth);
+                String role = securityUtils.extractRole(auth);
 
                 return ResponseEntity.ok(
                                 orderService.cancelOrder(id, userId, role));
@@ -161,7 +158,7 @@ public class OrderController {
                         @RequestBody ForceCancelRequest request,
                         Authentication auth) {
 
-                Long adminId = extractUserId(auth);
+                Long adminId = securityUtils.extractUserId(auth);
 
                 return ResponseEntity.ok(
                                 orderService.forceCancel(id, request.reason(), adminId));
@@ -175,28 +172,10 @@ public class OrderController {
                         @RequestParam String reason,
                         Authentication auth) {
 
-                Long adminId = extractUserId(auth);
+                Long adminId = securityUtils.extractUserId(auth);
 
                 return ResponseEntity.ok(
                                 orderService.adminReassign(id, riderId, reason, adminId));
-        }
-
-        // ─── HELPERS ───────────────────────────────────────────────────────────
-
-        private Long extractUserId(Authentication auth) {
-                String email = auth.getName();
-                return userRepository.findIdByEmail(email)
-                                .orElseThrow(() -> new ResourceNotFoundException("User", email));
-        }
-
-        private String extractRole(Authentication auth) {
-                return auth.getAuthorities().stream()
-                                .map(GrantedAuthority::getAuthority)
-                                .filter(Objects::nonNull)
-                                .filter(a -> a.startsWith("ROLE_"))
-                                .map(a -> a.substring(5))
-                                .findFirst()
-                                .orElseThrow(() -> new RuntimeException("No role found"));
         }
 
 }

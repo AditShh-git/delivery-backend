@@ -16,13 +16,15 @@ public interface CompanyService {
     CompanyResponse updateCompanyStatus(Long id, CompanyStatus status);
 
     Page<CompanyResponse> getCompanies(int page,
-                                       int size,
-                                       CompanyStatus status,
-                                       String search);
+            int size,
+            CompanyStatus status,
+            String search);
 
     CompanyResponse getCompany(Long id);
 
     CompanyResponse onboardCompany(Long companyId, CompanyOnboardRequest request);
+
+    CompanyResponse onboardCompanyByEmail(String email, CompanyOnboardRequest request);
 
     CompanyDashboardResponse getDashboard(Long companyId);
 

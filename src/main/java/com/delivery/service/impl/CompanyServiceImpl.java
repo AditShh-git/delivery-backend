@@ -58,8 +58,7 @@ public class CompanyServiceImpl implements CompanyService {
     @Transactional(readOnly = true)
     public CompanyDashboardResponse getDashboard(Long companyId) {
 
-        OrderKpiProjection orderKpis =
-                companyRepository.getCompanyOrderKpis(companyId);
+        OrderKpiProjection orderKpis = companyRepository.getCompanyOrderKpis(companyId);
 
         long totalOrders = safe(orderKpis.getTotalOrders());
         long totalDelivered = safe(orderKpis.getTotalDelivered());
@@ -70,8 +69,7 @@ public class CompanyServiceImpl implements CompanyService {
                 ? 0
                 : (totalDelivered * 100.0) / totalOrders;
 
-        long activeRiders =
-                riderRepository.countByCompanyIdAndIsOnDutyTrue(companyId);
+        long activeRiders = riderRepository.countByCompanyIdAndIsOnDutyTrue(companyId);
 
         return new CompanyDashboardResponse(
                 totalOrders,
@@ -79,14 +77,12 @@ public class CompanyServiceImpl implements CompanyService {
                 totalFailed,
                 Math.round(successRate * 100.0) / 100.0,
                 slaBreached,
-                activeRiders
-        );
+                activeRiders);
     }
+
     private long safe(Long value) {
         return value == null ? 0L : value;
     }
-
-
 
     @Override
     public CompanyResponse createEnterpriseCompany(CreateCompanyRequest request) {
@@ -109,8 +105,8 @@ public class CompanyServiceImpl implements CompanyService {
         company.setName(normalizedName);
         company.setContact(normalizedContact);
         company.setEmail(normalizedEmail);
-        company.setDeliveryModel(request.deliveryModel());  // REQUIRED in request
-        company.setStatus(CompanyStatus.ACTIVE);            // Enterprise auto-active
+        company.setDeliveryModel(request.deliveryModel()); // REQUIRED in request
+        company.setStatus(CompanyStatus.ACTIVE); // Enterprise auto-active
 
         companyRepository.save(company);
 
@@ -135,8 +131,7 @@ public class CompanyServiceImpl implements CompanyService {
         policy.setDeliveryType(deliveryType);
         policy.setMissedSlotAction(missedSlotAction);
         policy.setMaxReschedules(
-                request.maxReschedules() != null ? request.maxReschedules() : 3
-        );
+                request.maxReschedules() != null ? request.maxReschedules() : 3);
         policy.setPenaltyAmount(request.penaltyAmount());
         policy.setPickupChecklist(request.pickupChecklist());
 
@@ -186,8 +181,7 @@ public class CompanyServiceImpl implements CompanyService {
                     productCategory,
                     type,
                     missedSlotAction,
-                    request
-            );
+                    request);
 
             policies.add(policy);
         }
@@ -197,8 +191,7 @@ public class CompanyServiceImpl implements CompanyService {
 
     private CompanyResponse buildCompanyResponse(Company company) {
 
-        List<CompanyPolicy> policies =
-                policyRepository.findByCompanyId(company.getId());
+        List<CompanyPolicy> policies = policyRepository.findByCompanyId(company.getId());
 
         List<PolicyResponse> policyResponses = policies.stream()
                 .map(p -> new PolicyResponse(
@@ -213,16 +206,15 @@ public class CompanyServiceImpl implements CompanyService {
                 company.getId(),
                 company.getName(),
                 company.getContact(),
-                policyResponses
-        );
+                policyResponses);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<CompanyResponse> getCompanies(int page,
-                                              int size,
-                                              CompanyStatus status,
-                                              String search) {
+            int size,
+            CompanyStatus status,
+            String search) {
 
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
 
@@ -262,7 +254,7 @@ public class CompanyServiceImpl implements CompanyService {
 
     @Override
     public CompanyResponse onboardCompany(Long companyId,
-                                          CompanyOnboardRequest request) {
+            CompanyOnboardRequest request) {
 
         Company company = companyRepository.findById(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Company", companyId));
@@ -288,12 +280,24 @@ public class CompanyServiceImpl implements CompanyService {
                     request.maxReschedules(),
                     request.penaltyAmount(),
                     request.pickupChecklist(),
-                    category
-            );
+                    category);
 
             createPolicies(company, tempRequest);
         }
 
         return buildCompanyResponse(company);
+    }
+
+    @Override
+    public CompanyResponse onboardCompanyByEmail(String email, CompanyOnboardRequest request) {
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User", email));
+
+        if (user.getCompany() == null) {
+            throw new ApiException("Authenticated user is not associated with any company.");
+        }
+
+        return onboardCompany(user.getCompany().getId(), request);
     }
 }
