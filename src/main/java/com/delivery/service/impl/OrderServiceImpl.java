@@ -121,10 +121,26 @@ public class OrderServiceImpl implements OrderService {
         order.setSlaDeadline(deadline);
         order.setSlaBreached(false);
 
+        // ── Smart Risk Rule ──────────────────────────────────────────────────
+        // If this customer had ≥2 failed delivery attempts in the last 30 days,
+        // we don't trust dispatch without confirmation first.
+        // The scheduler will pick this order up and (re-)send the confirmation message.
+        long recentFails = attemptHistoryRepository
+                .countRecentDeliveryFailuresByCustomer(
+                        customerId,
+                        OffsetDateTime.now().minusDays(30));
+
+        if (recentFails >= 2) {
+            order.setStatus(OrderStatus.CONFIRMATION_PENDING);
+            order.setConfirmationSentAt(OffsetDateTime.now());
+            log.warn("High-risk customer {} — order forced to CONFIRMATION_PENDING ({} recent failures)",
+                    customerId, recentFails);
+        }
+
         Order saved = orderRepository.save(order);
 
-        log.info("Order created — id: {}, deliveryModel: {}, zone: {}",
-                saved.getId(), model, saved.getZone());
+        log.info("Order created — id: {}, deliveryModel: {}, zone: {}, status: {}",
+                saved.getId(), model, saved.getZone(), saved.getStatus());
 
         return OrderResponse.from(saved);
     }
@@ -296,6 +312,18 @@ public class OrderServiceImpl implements OrderService {
                 throw new ApiException("Failure reason is required when marking order as FAILED.");
             }
 
+            // ── GPS + Photo Validation ──────────────────────────────────────
+            // Prevent fake failure submissions — every FAILED attempt must be
+            // GPS-verified and photo-evidenced.
+            if (request.latitude() == null || request.longitude() == null) {
+                throw new ApiException(
+                        "GPS coordinates (latitude & longitude) are required when marking order as FAILED.");
+            }
+            if (request.photoUrl() == null || request.photoUrl().isBlank()) {
+                throw new ApiException(
+                        "A photo proof URL is required when marking order as FAILED.");
+            }
+
             int attempts = order.getAttemptCount() + 1;
             order.setAttemptCount(attempts);
 
@@ -310,6 +338,11 @@ public class OrderServiceImpl implements OrderService {
             history.setAttemptNumber(attempts);
             history.setFailureReason(request.failureReason());
             history.setRecordedBy(role);
+
+            // ── GPS + Photo Evidence ────────────────────────────────────────
+            history.setLatitude(request.latitude());
+            history.setLongitude(request.longitude());
+            history.setPhotoUrl(request.photoUrl());
 
             attemptHistoryRepository.save(history);
 
@@ -630,6 +663,114 @@ public class OrderServiceImpl implements OrderService {
         }
 
         order.setStatus(OrderStatus.CANCELLED);
+
+        return OrderResponse.from(order);
+    }
+
+    // ─── CONFIRM ORDER ─────────────────────────────────────────────────────
+    // Customer confirms they will be home for the scheduled delivery.
+    // Only valid when order is in CONFIRMATION_PENDING.
+
+    @Override
+    @Transactional
+    public OrderResponse confirmOrder(Long orderId, Long customerId) {
+
+        log.info("Customer {} confirming order {}", customerId, orderId);
+
+        Order order = findOrderById(orderId);
+
+        // ── Ownership ──────────────────────────────────────────────────────
+        if (!order.getCustomer().getId().equals(customerId)) {
+            throw new AccessDeniedException(
+                    "You do not have access to order: " + orderId);
+        }
+
+        // ── State Guard ────────────────────────────────────────────────────
+        if (order.getStatus() != OrderStatus.CONFIRMATION_PENDING) {
+            throw new ApiException(
+                    "Order " + orderId + " is not awaiting confirmation. Current status: "
+                            + order.getStatus());
+        }
+
+        order.setCustomerConfirmed(true);
+        order.setStatus(OrderStatus.CONFIRMED);
+
+        log.info("Order {} confirmed by customer {}", orderId, customerId);
+
+        return OrderResponse.from(order);
+    }
+
+    // ─── RESCHEDULE ORDER ──────────────────────────────────────────────────
+    // Customer requests a different delivery slot.
+    // Increments missedSlotCount and enforces the company's max-reschedules policy.
+    // Status stays CONFIRMATION_PENDING so the scheduler re-sends confirmation.
+
+    @Override
+    @Transactional
+    public OrderResponse rescheduleOrder(Long orderId,
+            Long customerId,
+            RescheduleRequest request) {
+
+        log.info("Customer {} rescheduling order {} to {} {}",
+                customerId, orderId, request.newSlotDate(), request.newSlotLabel());
+
+        Order order = findOrderById(orderId);
+
+        // ── Ownership ──────────────────────────────────────────────────────
+        if (!order.getCustomer().getId().equals(customerId)) {
+            throw new AccessDeniedException(
+                    "You do not have access to order: " + orderId);
+        }
+
+        // ── State Guard ────────────────────────────────────────────────────
+        if (order.getStatus() != OrderStatus.CONFIRMATION_PENDING
+                && order.getStatus() != OrderStatus.CREATED) {
+            throw new ApiException(
+                    "Order " + orderId + " cannot be rescheduled from status: "
+                            + order.getStatus());
+        }
+
+        // ── Slot Date must be in the future ───────────────────────────────
+        if (!request.newSlotDate().isAfter(java.time.LocalDate.now())) {
+            throw new ApiException("New slot date must be a future date.");
+        }
+
+        // ── Policy: check reschedule limit ────────────────────────────────
+        CompanyPolicy policy = companyPolicyRepository
+                .findByCompanyIdAndProductCategoryAndDeliveryType(
+                        order.getCompany().getId(),
+                        order.getProductCategory(),
+                        order.getDeliveryType())
+                .or(() -> companyPolicyRepository
+                        .findByCompanyIdAndProductCategory(
+                                order.getCompany().getId(),
+                                order.getProductCategory()))
+                .orElseThrow(() -> new ApiException(
+                        "Policy not found for company " + order.getCompany().getId()));
+
+        int newMissedCount = order.getMissedSlotCount() + 1;
+
+        if (newMissedCount > policy.getMaxReschedules()) {
+            throw new ApiException(
+                    "Maximum reschedules (" + policy.getMaxReschedules()
+                            + ") already reached for this order.");
+        }
+
+        // ── Apply Reschedule ──────────────────────────────────────────────
+        order.setMissedSlotCount(newMissedCount);
+        order.setSlotDate(request.newSlotDate());
+        order.setSlotLabel(request.newSlotLabel());
+
+        // Keep in CONFIRMATION_PENDING so the scheduler re-sends confirmation.
+        // If the order was CREATED (pre-flagged by risk rule), move to
+        // CONFIRMATION_PENDING.
+        order.setStatus(OrderStatus.CONFIRMATION_PENDING);
+        order.setCustomerConfirmed(false);
+        order.setConfirmationSentAt(null);
+        order.setReminderSent(false);
+
+        log.info("Order {} rescheduled to {} {} (missedSlotCount={})",
+                orderId, request.newSlotDate(), request.newSlotLabel(), newMissedCount);
 
         return OrderResponse.from(order);
     }

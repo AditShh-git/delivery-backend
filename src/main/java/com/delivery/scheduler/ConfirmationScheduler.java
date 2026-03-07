@@ -23,29 +23,35 @@ public class ConfirmationScheduler {
     private final OrderRepository orderRepository;
 
     // ─────────────────────────────────────────────
-    // 6:00 AM — Send Confirmation
+    // 6:00 AM — Send Confirmation for TOMORROW's orders
     // ─────────────────────────────────────────────
     @Scheduled(cron = "0 0 6 * * ?")
     @Transactional
     public void sendMorningConfirmations() {
 
-        LocalDate today = LocalDate.now();
+        // Target orders slotted for tomorrow, not today.
+        // Today's orders are too late to reschedule meaningfully.
+        LocalDate tomorrow = LocalDate.now().plusDays(1);
 
-        List<Order> orders =
-                orderRepository.findByStatusAndSlotDateAndCustomerConfirmedFalse(
-                        OrderStatus.CREATED,
-                        today
-                );
+        List<Order> orders = orderRepository.findByStatusAndSlotDateAndCustomerConfirmedFalse(
+                OrderStatus.CREATED,
+                tomorrow);
 
         for (Order order : orders) {
+
+            // Skip orders already pre-flagged by the smart risk rule —
+            // they're already in CONFIRMATION_PENDING with confirmationSentAt set.
+            if (order.getStatus() == OrderStatus.CONFIRMATION_PENDING) {
+                continue;
+            }
 
             order.setStatus(OrderStatus.CONFIRMATION_PENDING);
             order.setConfirmationSentAt(OffsetDateTime.now());
             order.setReminderSent(false);
 
-            log.info("6AM confirmation sent for order {}", order.getId());
+            log.info("6AM confirmation sent for order {} (slotDate={})", order.getId(), tomorrow);
 
-            // simulate WhatsApp send here later
+            // TODO: wire real WhatsApp/SMS provider (Week 9)
         }
     }
 
@@ -56,18 +62,16 @@ public class ConfirmationScheduler {
     @Transactional
     public void processPendingConfirmations() {
 
-        List<Order> pending =
-                orderRepository.findByStatusAndCustomerConfirmedFalse(
-                        OrderStatus.CONFIRMATION_PENDING);
+        List<Order> pending = orderRepository.findByStatusAndCustomerConfirmedFalse(
+                OrderStatus.CONFIRMATION_PENDING);
 
         for (Order order : pending) {
 
             if (order.getConfirmationSentAt() == null)
                 continue;
 
-            boolean twelveHoursPassed =
-                    OffsetDateTime.now()
-                            .isAfter(order.getConfirmationSentAt().plusHours(12));
+            boolean twelveHoursPassed = OffsetDateTime.now()
+                    .isAfter(order.getConfirmationSentAt().plusHours(12));
 
             if (!twelveHoursPassed)
                 continue;

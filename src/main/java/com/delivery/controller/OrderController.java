@@ -178,4 +178,47 @@ public class OrderController {
                                 orderService.adminReassign(id, riderId, reason, adminId));
         }
 
+        // ─── CONFIRM — CUSTOMER only ────────────────────────────────────────────
+        // Customer confirms they will be home → moves CONFIRMATION_PENDING → CONFIRMED.
+        @PreAuthorize("hasRole('CUSTOMER')")
+        @PostMapping("/{id}/confirm")
+        public ResponseEntity<OrderResponse> confirmOrder(
+                        @PathVariable("id") Long id,
+                        Authentication auth) {
+
+                Long customerId = securityUtils.extractUserId(auth);
+                log.info("POST /api/orders/{}/confirm — customerId: {}", id, customerId);
+                return ResponseEntity.ok(orderService.confirmOrder(id, customerId));
+        }
+
+        // ─── RESCHEDULE — CUSTOMER only ─────────────────────────────────────────
+        // Customer picks a new slot → stays in CONFIRMATION_PENDING for re-send.
+        @PreAuthorize("hasRole('CUSTOMER')")
+        @PostMapping("/{id}/reschedule")
+        public ResponseEntity<OrderResponse> rescheduleOrder(
+                        @PathVariable("id") Long id,
+                        @Valid @RequestBody RescheduleRequest request,
+                        Authentication auth) {
+
+                Long customerId = securityUtils.extractUserId(auth);
+                log.info("POST /api/orders/{}/reschedule — customerId: {}", id, customerId);
+                return ResponseEntity.ok(orderService.rescheduleOrder(id, customerId, request));
+        }
+
+        // ─── PER-ORDER ATTEMPTS — ADMIN / COMPANY / RIDER ───────────────────────
+        // Dedicated endpoint that surfaces only the attempt history for a single order.
+        @PreAuthorize("hasAnyRole('ADMIN','COMPANY','RIDER')")
+        @GetMapping("/{id}/attempts")
+        public ResponseEntity<Page<AttemptHistoryResponse>> getOrderAttempts(
+                        @PathVariable("id") Long id,
+                        @RequestParam(defaultValue = "0") int page,
+                        @RequestParam(defaultValue = "20") int size) {
+
+                Pageable pageable = PageRequest.of(page, size,
+                                Sort.by("createdAt").descending());
+
+                return ResponseEntity.ok(
+                                orderService.getAttemptHistory(id, null, null, null, pageable));
+        }
+
 }

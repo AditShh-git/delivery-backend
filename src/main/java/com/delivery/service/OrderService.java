@@ -11,44 +11,57 @@ import java.time.LocalDate;
 
 public interface OrderService {
 
-    OrderResponse createOrder(Long customerId, CreateOrderRequest request);
+        OrderResponse createOrder(Long customerId, CreateOrderRequest request);
 
-    OrderResponse assignRider(Long orderId, AssignRiderRequest request, Long adminId);
+        OrderResponse assignRider(Long orderId, AssignRiderRequest request, Long adminId);
 
-    OrderResponse updateStatus(Long orderId, UpdateStatusRequest request,
-                               Long userId, String role);
+        OrderResponse updateStatus(Long orderId, UpdateStatusRequest request,
+                        Long userId, String role);
 
-    Page<OrderResponse> getOrders(
-            Long userId,
-            String role,
-            OrderStatus status,
-            Long companyId,
-            Long riderId,
-            String zone,
-            LocalDate startDate,
-            LocalDate endDate,
-            Pageable pageable
-    );
-    OrderResponse cancelOrder(Long orderId,
-                              Long userId,
-                              String role);
+        Page<OrderResponse> getOrders(
+                        Long userId,
+                        String role,
+                        OrderStatus status,
+                        Long companyId,
+                        Long riderId,
+                        String zone,
+                        LocalDate startDate,
+                        LocalDate endDate,
+                        Pageable pageable);
 
-    OrderResponse getOrderById(Long orderId, Long userId, String role);
+        OrderResponse cancelOrder(Long orderId,
+                        Long userId,
+                        String role);
 
-    Page<AttemptHistoryResponse> getAttemptHistory(
-            Long orderId,
-            Long riderId,
-            LocalDate startDate,
-            LocalDate endDate,
-            Pageable pageable);
+        OrderResponse getOrderById(Long orderId, Long userId, String role);
 
-    Page<OrderResponse> getSlaBreachedOrders(Pageable pageable);
+        Page<AttemptHistoryResponse> getAttemptHistory(
+                        Long orderId,
+                        Long riderId,
+                        LocalDate startDate,
+                        LocalDate endDate,
+                        Pageable pageable);
 
-    OrderResponse forceCancel(Long orderId, String reason, Long adminId);
+        Page<OrderResponse> getSlaBreachedOrders(Pageable pageable);
 
-    OrderResponse adminReassign(Long orderId,
-                                Long riderId,
-                                String reason,
-                                Long adminId);
+        OrderResponse forceCancel(Long orderId, String reason, Long adminId);
+
+        OrderResponse adminReassign(Long orderId,
+                        Long riderId,
+                        String reason,
+                        Long adminId);
+
+        // ── Week 5: Customer Confirmation Flow ───────────────────────────────────
+
+        /**
+         * Customer confirms they will be home — moves order CONFIRMATION_PENDING →
+         * CONFIRMED.
+         */
+        OrderResponse confirmOrder(Long orderId, Long customerId);
+
+        /**
+         * Customer requests a different slot — updates slot fields, keeps order
+         * reschedulable.
+         */
+        OrderResponse rescheduleOrder(Long orderId, Long customerId, RescheduleRequest request);
 }
-
