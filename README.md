@@ -11,7 +11,7 @@ I've personally faced three frustrating problems as a customer:
 
 1. **Too many apps** — food delivery, courier, electronics returns all use different platforms. Why can't one backend handle all of them?
 2. **The introvert problem** — when an order is out for delivery, the rider randomly calls. Some customers don't pick up because they're anxious about unexpected calls. The order fails — not because the customer was unavailable, but because they weren't prepared. **Scheduled slots fix this.**
-3. **False no-show claims** — riders sometimes mark an order as attempted when they never showed up. Customers get charged. There's no proof either way. **OTP verification and delivery proof solve this** (Week 7).
+3. **False no-show claims** — riders sometimes mark an order as attempted when they never showed up. Customers get charged. There's no proof either way. **OTP verification and GPS-photo proof solve this.**
 
 This platform is my attempt to solve all three in one system.
 
@@ -26,6 +26,8 @@ Policy Enforcement Layer (CompanyPolicy per product + delivery type)
      ↓
 State Machine Lifecycle (10 statuses, enforced transitions)
      ↓
+Domain Rule Layer (OTP guard — platform invariant, not configurable)
+     ↓
 Capacity-Safe Rider Dispatch (zone match, duty check, concurrency limit)
      ↓
 Scheduler Layer (SLA automation, confirmation flow, auto-cancel)
@@ -33,7 +35,8 @@ Scheduler Layer (SLA automation, confirmation flow, auto-cancel)
 Analytics + Caching Layer (Redis, native SQL, projections)
 ```
 
-Controllers are thin HTTP adapters — all business logic lives in service classes.
+Controllers are thin HTTP adapters — all business logic lives in service classes.  
+OTP enforcement is a platform-level invariant: no configuration can bypass it.
 
 ---
 
@@ -45,15 +48,16 @@ Controllers are thin HTTP adapters — all business logic lives in service class
 | 3 | Order Engine — state machine, slots, WhatsApp, SLA | ✅ Done |
 | 4 | Analytics — dashboards, Redis caching, projections | ✅ Done |
 | 5 | SLA Automation — scheduler, trend API, zone heatmap | ✅ Done |
-| 5+ | Clean Architecture — refactored controllers to thin HTTP adapters | ✅ Done |
-| 6 | Auto-Dispatch + RunSheet | 🔜 Planned |
-| 7 | OTP + Proof + Notifications | 🔜 Planned |
-| 8–9 | Intelligence — incentive engine, confidence scoring | 🔜 Future |
-| 10–11 | Scale — partner API, webhooks, rate limiting, K8s | 🔜 Future |
+| 5+ | Clean Architecture — thin controllers, refactored services | ✅ Done |
+| 6 | Delivery Verification — OTP system + platform-mandatory enforcement | ✅ Done |
+| 7 | Photo Proof Enforcement — GPS + photo on every FAILED attempt | ✅ Done |
+| 8 | Auto-Dispatch + RunSheet | 🔜 Planned |
+| 9–10 | Intelligence — incentive engine, confidence scoring | 🔜 Future |
+| 11–12 | Scale — partner API, webhooks, rate limiting, K8s | 🔜 Future |
 
 ---
 
-## 🔑 Key Features (Weeks 1–5)
+## 🔑 Key Features
 
 ### Auth & Roles
 - JWT authentication with BCrypt password hashing
@@ -103,21 +107,49 @@ Once the customer confirms, they must choose a delivery window:
 - After a **full day ignored** → order is automatically rescheduled to the next day (`slotDate + 1`)
 - After **3 consecutive ignored days** → order is auto-cancelled (`autoCancelled = true`)
 
-> **Planned (not yet implemented):** customer-triggered `RESCHEDULE` keyword, delivery-day reminder message, and automated company notification on cancellation.
-
 ### Order State Machine
 ```
-CREATED → CONFIRMATION_PENDING → CONFIRMED → ASSIGNED → IN_TRANSIT → DELIVERED
+CREATED → CONFIRMATION_PENDING → CONFIRMED → ASSIGNED → IN_TRANSIT
                                                               ↓
-                                                           FAILED → retry → auto-unassign
+                                    DELIVERED ← (OTP verified) ← IN_TRANSIT
+                                    COLLECTED ← (OTP verified) ← IN_TRANSIT
+                                    FAILED → (GPS + photo required) → retry
+                                    DISPUTED → (OPEN_BOX only)
 ```
+
 Invalid transitions are **blocked at the service layer**. An order cannot jump to `ASSIGNED` before `CONFIRMED`. This keeps rider analytics and KPI dashboards accurate.
+
+### 🔐 OTP Delivery Verification
+
+Every `DELIVERED` and `COLLECTED` transition requires a verified OTP — with no config flag to skip it.
+
+**Flow:**
+1. Rider calls `POST /api/orders/{id}/otp/send` → 6-digit OTP generated, BCrypt-hashed, stored
+2. Customer shares the OTP with the rider
+3. Rider calls `POST /api/orders/{id}/otp/verify` with the raw OTP → BCrypt compared
+4. Only after verified → `PATCH /api/orders/{id}/status` with `DELIVERED`/`COLLECTED` is accepted
+
+**Guard implementation:**
+- `ensureOtpVerified()` is a private domain-rule method called *before* `order.setStatus()` — the transition is atomic
+- 3 wrong attempts → OTP permanently locked; rider must re-send
+- `@Transactional(noRollbackFor = ApiException.class)` on `verifyOtp` ensures `wrong_attempts` increments persist even when the exception is thrown
+- OTP hash stored in `delivery_otps` table; `verified_at` recorded as audit trail
+
+This eliminates the "fake delivery" problem — no completion without proof.
+
+### 📍 GPS + Photo Proof on Every Failed Attempt
+- Every `FAILED` status update requires `latitude`, `longitude`, and `photoUrl`
+- Stored in `attempt_history` alongside `failure_reason`, `rider_id`, and `attempt_number`
+- Prevents false no-show claims — every failed delivery is GPS-verified and photo-evidenced
+
+### Smart Risk Rule
+- On order creation, if a customer had **≥ 2 failed deliveries in the last 30 days**, the order is immediately placed in `CONFIRMATION_PENDING`
+- The `ConfirmationScheduler` picks it up and re-sends confirmation — no silent dispatch for high-risk customers
 
 ### SLA Automation
 - `SlaBreachScheduler` runs every **5 minutes** via `@Scheduled`
 - Finds orders past their SLA deadline with `slaBreached = false`
 - Auto-flags them and evicts the Redis dashboard cache
-- Closes the gap where manual rider updates could leave breached orders undetected
 
 ### Analytics Dashboards
 - **Admin KPI** — 9 executive metrics: total orders, delivered, failed, success rate, SLA breached, active riders, companies
@@ -133,7 +165,6 @@ All dashboards use **native SQL aggregation + typed Spring projections** (no `Ob
 - `@Cacheable` on admin and company dashboards
 - `@CacheEvict` on every order create, status update, and rider assignment
 - All cache names registered in `CacheConfig` to prevent `Cannot find cache named` errors
-- Prevents heavy analytics queries from hitting the DB on every request
 
 ### WhatsApp Webhook Engine
 - Inbound replies handled by `WhatsAppWebhookService` (interface + `WhatsAppWebhookServiceImpl`)
@@ -162,9 +193,9 @@ All dashboards use **native SQL aggregation + typed Spring projections** (no `Ob
 
 ## 🗄 Database
 
-- **20 Flyway migrations** — full schema versioning from V1 to V20
+- **22 Flyway migrations** — full schema versioning from V1 to V22
 - Indexes on: `zone`, `status`, `sla_breached`, `company_id`, `created_at`
-- Key tables: `orders`, `riders`, `users`, `companies`, `attempt_history`, `slot_capacities`, `zones`
+- Key tables: `orders`, `riders`, `users`, `companies`, `attempt_history`, `delivery_otps`, `slot_capacities`, `zones`
 
 ---
 
@@ -209,7 +240,7 @@ PostgreSQL on `5432`, Redis on `6379`.
 ```
 src/
 ├── controller/       # Thin REST adapters — routing, auth, request/response mapping only
-├── service/          # Business logic, state machine, policy enforcement
+├── service/          # Business logic, state machine, domain rule enforcement
 │   └── impl/         # Service implementations
 ├── slot/             # Slot capacity entity, repository, service, and controller
 ├── repository/       # Spring Data JPA + native SQL queries
@@ -223,12 +254,12 @@ src/
 ├── security/         # JWT filter, token provider
 ├── utils/            # Shared utilities
 └── exception/        # Global exception handler
-db/migration/         # V1–V20 Flyway SQL migrations
+db/migration/         # V1–V22 Flyway SQL migrations
 ```
 
 ---
 
-## 🔜 Coming Next (Week 6)
+## 🔜 Coming Next
 
 - **AutoDispatchScheduler** — INSTANT orders self-assign to the best available rider every 5 seconds
 - **RunSheet System** — admin creates a sorted delivery list for PARCEL riders, route ordered by nearest-neighbor GPS sort, exportable as CSV

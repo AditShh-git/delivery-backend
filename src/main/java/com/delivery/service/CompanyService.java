@@ -7,8 +7,6 @@ import com.delivery.dto.response.CompanyResponse;
 import com.delivery.entity.CompanyStatus;
 import org.springframework.data.domain.Page;
 
-import java.util.List;
-
 public interface CompanyService {
 
     CompanyResponse createEnterpriseCompany(CreateCompanyRequest request);

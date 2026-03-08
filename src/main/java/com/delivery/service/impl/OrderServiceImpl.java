@@ -32,6 +32,7 @@ public class OrderServiceImpl implements OrderService {
     private final CompanyPolicyRepository companyPolicyRepository;
     private final AttemptHistoryRepository attemptHistoryRepository;
     private final ZoneRepository zoneRepository;
+    private final DeliveryOtpRepository deliveryOtpRepository;
 
     // ─── CREATE ────────────────────────────────────────────────────────────
 
@@ -373,6 +374,14 @@ public class OrderServiceImpl implements OrderService {
             return OrderResponse.from(order);
         }
 
+        // ── OTP GUARD (platform-mandatory) ─────────────────────────
+        // OTP is a platform invariant — not a policy flag.
+        // Every DELIVERED / COLLECTED transition must have a verified OTP.
+        // FAILED / CANCELLED / DISPUTED are exempt — no completion = no proof needed.
+        if (newStatus == OrderStatus.DELIVERED || newStatus == OrderStatus.COLLECTED) {
+            ensureOtpVerified(order, newStatus);
+        }
+
         // ── NORMAL STATUS UPDATE ────────────────────────────────────
         order.setStatus(newStatus);
 
@@ -552,6 +561,30 @@ public class OrderServiceImpl implements OrderService {
                         "DISPUTED status is only valid for OPEN_BOX delivery orders.");
             }
         }
+    }
+
+    // ─── DOMAIN RULE: OTP must be verified before order completion ─────────
+    //
+    // This is a platform-level invariant, not a company policy.
+    // No configuration can bypass it. The state machine calls this before
+    // applying the status change so the transition is always atomic.
+
+    private void ensureOtpVerified(Order order, OrderStatus newStatus) {
+
+        DeliveryOtp otp = deliveryOtpRepository
+                .findTopByOrderIdOrderByCreatedAtDesc(order.getId())
+                .orElseThrow(() -> new ApiException(
+                        "OTP not found for order " + order.getId()
+                                + ". Rider must call /otp/send first."));
+
+        if (!otp.isVerified()) {
+            throw new ApiException(
+                    "OTP not verified. Cannot mark order as " + newStatus
+                            + ". Rider must verify the OTP first.");
+        }
+
+        log.debug("OTP guard passed for order {} — allowing transition to {}",
+                order.getId(), newStatus);
     }
 
     // ─── GET ORDERS ────────────────────────────────────────────────────────

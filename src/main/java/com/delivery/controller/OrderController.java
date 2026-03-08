@@ -3,9 +3,11 @@ package com.delivery.controller;
 import com.delivery.dto.request.*;
 import com.delivery.dto.response.AttemptHistoryResponse;
 import com.delivery.dto.response.OrderResponse;
+import com.delivery.dto.response.OtpResponse;
 import com.delivery.entity.OrderStatus;
 import com.delivery.utils.SecurityUtils;
 import com.delivery.service.OrderService;
+import com.delivery.service.OtpService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,7 @@ import java.time.LocalDate;
 public class OrderController {
 
         private final OrderService orderService;
+        private final OtpService otpService;
         private final SecurityUtils securityUtils;
 
         // ─── CREATE — CUSTOMER only ────────────────────────────────────────────
@@ -219,6 +222,40 @@ public class OrderController {
 
                 return ResponseEntity.ok(
                                 orderService.getAttemptHistory(id, null, null, null, pageable));
+        }
+
+        // ─── OTP — RIDER only ────────────────────────────────────────────────────
+
+        /**
+         * Rider calls this on arrival at the customer's address.
+         * Generates a 6-digit OTP and simulates SMS delivery (logs plaintext for
+         * testing).
+         */
+        @PreAuthorize("hasRole('RIDER')")
+        @PostMapping("/{id}/otp/send")
+        public ResponseEntity<OtpResponse> sendOtp(
+                        @PathVariable("id") Long id,
+                        Authentication auth) {
+
+                Long riderId = securityUtils.extractUserId(auth);
+                log.info("POST /api/orders/{}/otp/send — riderId: {}", id, riderId);
+                return ResponseEntity.ok(otpService.sendOtp(id, riderId));
+        }
+
+        /**
+         * Rider enters the OTP received from the customer.
+         * Validates expiry, attempt count, and BCrypt hash match.
+         */
+        @PreAuthorize("hasRole('RIDER')")
+        @PostMapping("/{id}/otp/verify")
+        public ResponseEntity<OtpResponse> verifyOtp(
+                        @PathVariable("id") Long id,
+                        @Valid @RequestBody OtpVerifyRequest request,
+                        Authentication auth) {
+
+                Long riderId = securityUtils.extractUserId(auth);
+                log.info("POST /api/orders/{}/otp/verify — riderId: {}", id, riderId);
+                return ResponseEntity.ok(otpService.verifyOtp(id, riderId, request.otp()));
         }
 
 }

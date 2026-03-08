@@ -4,7 +4,6 @@ import com.delivery.dto.request.LoginRequest;
 import com.delivery.dto.request.SignupRequest;
 import com.delivery.dto.response.AuthResponse;
 import com.delivery.service.AuthService;
-import com.delivery.service.impl.AuthServiceImpl;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

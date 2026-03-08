@@ -6,12 +6,9 @@ import lombok.*;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(
-        name = "zones",
-        uniqueConstraints = {
-                @UniqueConstraint(name = "uk_zone_city_name", columnNames = {"city", "name"})
-        }
-)
+@Table(name = "zones", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_zone_city_name", columnNames = { "city", "name" })
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -30,6 +27,7 @@ public class Zone {
     private String name;
 
     @Column(nullable = false)
+    @Builder.Default
     private boolean isActive = true;
 
     private OffsetDateTime createdAt;

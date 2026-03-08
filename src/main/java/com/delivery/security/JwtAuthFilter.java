@@ -25,8 +25,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain)
+            HttpServletResponse response,
+            FilterChain filterChain)
             throws ServletException, IOException {
 
         String header = request.getHeader("Authorization");
@@ -46,9 +46,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        Claims claims      = jwtUtils.extractClaims(token);
-        String email       = claims.getSubject();
-        List<String> roles = claims.get("roles", List.class);
+        Claims claims = jwtUtils.extractClaims(token);
+        String email = claims.getSubject();
+        @SuppressWarnings("unchecked")
+        List<String> roles = (List<String>) claims.get("roles", List.class);
 
         if (roles == null || roles.isEmpty()) {
             log.warn("Token has no roles for user: {}", email);
