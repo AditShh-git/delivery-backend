@@ -24,6 +24,8 @@ logging:
     org.hibernate.SQL: DEBUG
     org.hibernate.orm.jdbc.bind: TRACE
 
+
+
   file:
     name: logs/delivery.log
 
@@ -42,7 +44,7 @@ app:
     secret: ${JWT_SECRET}
     expiration-ms: 86400000
   webhook:
-    secret: ${WEBHOOK_SECRET}
+    secret: test123
 
 management:
   endpoints:
@@ -52,3 +54,8 @@ management:
   endpoint:
     mappings:
       enabled: true
+
+twilio:
+  accountSid: YOUR_ACCOUNT_SID
+  authToken: YOUR_AUTH_TOKEN
+  whatsappFrom: whatsapp:+14155238886
