@@ -21,12 +21,16 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 import java.time.LocalDate;
 
 @Slf4j
 @RestController
 @RequestMapping("/api/orders")
 @RequiredArgsConstructor
+@Tag(name = "Order Management", description = "Endpoints for all order-related operations")
 public class OrderController {
 
         private final OrderService orderService;
@@ -36,6 +40,7 @@ public class OrderController {
         // ─── CREATE — CUSTOMER only ────────────────────────────────────────────
         @PreAuthorize("hasRole('CUSTOMER')")
         @PostMapping
+        @Operation(summary = "Create Order", description = "Customer creates a new delivery order")
         public ResponseEntity<OrderResponse> createOrder(
                         @Valid @RequestBody CreateOrderRequest request,
                         Authentication auth) {
@@ -50,6 +55,7 @@ public class OrderController {
         // ─── ASSIGN RIDER — ADMIN only ─────────────────────────────────────────
         @PreAuthorize("hasRole('ADMIN')")
         @PostMapping("/{id}/assign")
+        @Operation(summary = "Assign Rider", description = "Admin explicitly assigns a rider to an order")
         public ResponseEntity<OrderResponse> assignRider(
                         @PathVariable("id") Long id,
                         @Valid @RequestBody AssignRiderRequest request,
@@ -63,6 +69,7 @@ public class OrderController {
         // ─── UPDATE STATUS — RIDER + ADMIN ─────────────────────────────────────
         @PreAuthorize("hasRole('RIDER') or hasRole('ADMIN')")
         @PatchMapping("/{id}/status")
+        @Operation(summary = "Update Order Status", description = "Rider or Admin updates the order state")
         public ResponseEntity<OrderResponse> updateStatus(
                         @PathVariable("id") Long id,
                         @Valid @RequestBody UpdateStatusRequest request,
@@ -77,6 +84,7 @@ public class OrderController {
         // ─── GET ALL — role-based filtering ────────────────────────────────────
         @GetMapping
         @PreAuthorize("hasAnyRole('ADMIN','CUSTOMER','RIDER','COMPANY')")
+        @Operation(summary = "Get All Orders", description = "Retrieve paginated orders based on role and filters")
         public ResponseEntity<Page<OrderResponse>> getOrders(
                         Authentication auth,
                         @RequestParam(name = "page", defaultValue = "0") int page,
@@ -100,6 +108,7 @@ public class OrderController {
         // ─── GET BY ID — access-validated inside service ───────────────────────
         @PreAuthorize("hasAnyRole('ADMIN','CUSTOMER','RIDER','COMPANY')")
         @GetMapping("/{id}")
+        @Operation(summary = "Get Order by ID", description = "Retrieve specific order details")
         public ResponseEntity<OrderResponse> getOrderById(
                         @PathVariable("id") Long id,
                         Authentication auth) {
@@ -112,6 +121,7 @@ public class OrderController {
 
         @PreAuthorize("hasAnyRole('ADMIN','COMPANY')")
         @PatchMapping("/{id}/cancel")
+        @Operation(summary = "Cancel Order", description = "Admin or Company cancels an order")
         public ResponseEntity<OrderResponse> cancelOrder(
                         @PathVariable("id") Long id,
                         Authentication auth) {
@@ -125,6 +135,7 @@ public class OrderController {
 
         @PreAuthorize("hasRole('ADMIN')")
         @GetMapping("/attempt-history")
+        @Operation(summary = "Get Attempt History", description = "Retrieve global delivery attempt history")
         public ResponseEntity<Page<AttemptHistoryResponse>> getAttemptHistory(
                         @RequestParam(required = false) Long orderId,
                         @RequestParam(required = false) Long riderId,
@@ -143,6 +154,7 @@ public class OrderController {
 
         @PreAuthorize("hasRole('ADMIN')")
         @GetMapping("/sla-breaches")
+        @Operation(summary = "Get SLA Breaches", description = "Retrieve orders that breached their SLA")
         public ResponseEntity<Page<OrderResponse>> getSlaBreaches(
                         @RequestParam(defaultValue = "0") int page,
                         @RequestParam(defaultValue = "10") int size) {
@@ -156,6 +168,7 @@ public class OrderController {
 
         @PreAuthorize("hasRole('ADMIN')")
         @PostMapping("/{id}/force-cancel")
+        @Operation(summary = "Force Cancel", description = "Admin forcefully cancels an order with a reason")
         public ResponseEntity<OrderResponse> forceCancel(
                         @PathVariable("id") Long id,
                         @RequestBody ForceCancelRequest request,
@@ -169,6 +182,7 @@ public class OrderController {
 
         @PreAuthorize("hasRole('ADMIN')")
         @PostMapping("/{id}/reassign")
+        @Operation(summary = "Reassign Rider", description = "Admin reassigns an order to a different rider")
         public ResponseEntity<OrderResponse> reassign(
                         @PathVariable("id") Long id,
                         @RequestParam Long riderId,
@@ -185,6 +199,7 @@ public class OrderController {
         // Customer confirms they will be home → moves CONFIRMATION_PENDING → CONFIRMED.
         @PreAuthorize("hasRole('CUSTOMER')")
         @PostMapping("/{id}/confirm")
+        @Operation(summary = "Confirm Order", description = "Customer confirms they will be available")
         public ResponseEntity<OrderResponse> confirmOrder(
                         @PathVariable("id") Long id,
                         Authentication auth) {
@@ -198,6 +213,7 @@ public class OrderController {
         // Customer picks a new slot → stays in CONFIRMATION_PENDING for re-send.
         @PreAuthorize("hasRole('CUSTOMER')")
         @PostMapping("/{id}/reschedule")
+        @Operation(summary = "Reschedule Order", description = "Customer reschedules the delivery slot")
         public ResponseEntity<OrderResponse> rescheduleOrder(
                         @PathVariable("id") Long id,
                         @Valid @RequestBody RescheduleRequest request,
@@ -212,6 +228,7 @@ public class OrderController {
         // Dedicated endpoint that surfaces only the attempt history for a single order.
         @PreAuthorize("hasAnyRole('ADMIN','COMPANY','RIDER')")
         @GetMapping("/{id}/attempts")
+        @Operation(summary = "Get Per-Order Attempts", description = "Retrieve delivery attempt history for a specific order")
         public ResponseEntity<Page<AttemptHistoryResponse>> getOrderAttempts(
                         @PathVariable("id") Long id,
                         @RequestParam(defaultValue = "0") int page,
@@ -233,6 +250,7 @@ public class OrderController {
          */
         @PreAuthorize("hasRole('RIDER')")
         @PostMapping("/{id}/otp/send")
+        @Operation(summary = "Send OTP", description = "Rider triggers OTP generation to customer's phone")
         public ResponseEntity<OtpResponse> sendOtp(
                         @PathVariable("id") Long id,
                         Authentication auth) {
@@ -248,6 +266,7 @@ public class OrderController {
          */
         @PreAuthorize("hasRole('RIDER')")
         @PostMapping("/{id}/otp/verify")
+        @Operation(summary = "Verify OTP", description = "Rider verifies the OTP provided by the customer")
         public ResponseEntity<OtpResponse> verifyOtp(
                         @PathVariable("id") Long id,
                         @Valid @RequestBody OtpVerifyRequest request,

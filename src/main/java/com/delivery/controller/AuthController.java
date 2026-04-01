@@ -10,15 +10,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 @Slf4j
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
+@Tag(name = "Authentication", description = "Endpoints for user authentication")
 public class AuthController {
 
     private final AuthService authService;
 
     @PostMapping("/signup")
+    @Operation(summary = "User Signup", description = "Register a new user")
     public ResponseEntity<AuthResponse> signup(
             @Valid @RequestBody SignupRequest request) {
         log.info("POST /api/auth/signup — email: {}", request.email());
@@ -28,6 +33,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
+    @Operation(summary = "User Login", description = "Authenticate a user and get JWT token")
     public ResponseEntity<AuthResponse> login(
             @Valid @RequestBody LoginRequest request) {
         log.info("POST /api/auth/login — email: {}", request.email());

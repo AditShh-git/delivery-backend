@@ -5,6 +5,7 @@ import com.delivery.dto.response.AttemptHistoryResponse;
 import com.delivery.dto.response.OrderResponse;
 import com.delivery.entity.*;
 import com.delivery.exception.*;
+import com.delivery.projection.RiderKpiOrderProjection;
 import com.delivery.repository.*;
 import com.delivery.service.OrderService;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -50,54 +53,23 @@ public class OrderServiceImpl implements OrderService {
         Company company = companyRepository.findById(request.companyId())
                 .orElseThrow(() -> new ResourceNotFoundException("Company", request.companyId()));
 
-        // ── Zone (Pincode) Validation ─────────────────────────────────────────
         Zone zone = zoneRepository
                 .findByNameAndIsActiveTrue(request.pincode())
-                .orElseThrow(() -> new ApiException("Service not available for pincode: " + request.pincode()));
+                .orElseThrow(() -> new ApiException(
+                        "Service not available for pincode: " + request.pincode()));
 
-        // ── Slot Rules ─────────────────────────────────────────────────────────
-        DeliveryModel model = company.getDeliveryModel();
+        DeliveryModel model = request.deliveryModel();
 
-        switch (model) {
-            case INSTANT -> {
-                if (request.slotLabel() != null || request.slotDate() != null) {
-                    throw new ApiException(
-                            "INSTANT orders do not use slot booking.");
-                }
-            }
-
-            case PARCEL -> {
-                if (request.slotLabel() != null) {
-                    throw new ApiException(
-                            "PARCEL orders do not use time-window slots.");
-                }
-            }
-
-            case SCHEDULED -> {
-                if (request.slotDate() != null && request.slotLabel() == null) {
-                    throw new ApiException(
-                            "SCHEDULED orders require slotLabel when slotDate is provided.");
-                }
-            }
-
-            case PICKUP_RETURN -> {
-                if (request.slotDate() != null && request.slotLabel() == null) {
-                    throw new ApiException(
-                            "PICKUP_RETURN requires slotLabel when slotDate is provided.");
-                }
-            }
-        }
+        // ── Slot Rules ────────────────────────────────────────────────────────
+        validateSlotRules(model, request);
 
         // ── Build Order ───────────────────────────────────────────────────────
         Order order = new Order();
         order.setCustomer(customer);
         order.setCompany(company);
         order.setDeliveryAddress(request.deliveryAddress());
-
-        // Zone system
-        order.setZone(zone.getName()); // pincode
-        order.setLandmark(request.landmark()); // optional
-
+        order.setZone(zone.getName());
+        order.setLandmark(request.landmark());
         order.setItems(request.items());
         order.setOrderType(request.orderType());
         order.setDeliveryType(request.deliveryType());
@@ -105,112 +77,161 @@ public class OrderServiceImpl implements OrderService {
         order.setSlotDate(request.slotDate());
         order.setExternalOrderId(request.externalOrderId());
         order.setProductCategory(request.productCategory());
+        order.setDeliveryModel(model);
         order.setCallBeforeArrival(
                 request.callBeforeArrival() != null && request.callBeforeArrival());
-
-        order.setStatus(OrderStatus.CREATED);
         order.setAttemptCount(0);
 
-        // ── SLA ───────────────────────────────────────────────────────────────
-        OffsetDateTime deadline = switch (model) {
-            case INSTANT -> OffsetDateTime.now().plusMinutes(30);
-            case PARCEL -> OffsetDateTime.now().plusHours(48);
-            case SCHEDULED -> OffsetDateTime.now().plusHours(24);
-            case PICKUP_RETURN -> OffsetDateTime.now().plusHours(48);
-        };
+        // ── Status + SLA — single source of truth ────────────────────────────
+        setInitialStatus(order, model);
 
-        order.setSlaDeadline(deadline);
-        order.setSlaBreached(false);
+        // ── Smart Risk Override ───────────────────────────────────────────────
+        // High-risk customers always get confirmation step regardless of model.
+        // Only applies to INSTANT — PARCEL/SCHEDULED already have confirmation.
+        if (model == DeliveryModel.INSTANT) {
+            long recentFails = attemptHistoryRepository
+                    .countRecentDeliveryFailuresByCustomer(
+                            customerId,
+                            OffsetDateTime.now().minusDays(30));
 
-        // ── Smart Risk Rule ──────────────────────────────────────────────────
-        // If this customer had ≥2 failed delivery attempts in the last 30 days,
-        // we don't trust dispatch without confirmation first.
-        // The scheduler will pick this order up and (re-)send the confirmation message.
-        long recentFails = attemptHistoryRepository
-                .countRecentDeliveryFailuresByCustomer(
-                        customerId,
-                        OffsetDateTime.now().minusDays(30));
-
-        if (recentFails >= 2) {
-            order.setStatus(OrderStatus.CONFIRMATION_PENDING);
-            order.setConfirmationSentAt(OffsetDateTime.now());
-            log.warn("High-risk customer {} — order forced to CONFIRMATION_PENDING ({} recent failures)",
-                    customerId, recentFails);
+            if (recentFails >= 2) {
+                order.setStatus(OrderStatus.CONFIRMATION_PENDING);
+                order.setConfirmationSentAt(OffsetDateTime.now());
+                log.warn("High-risk customer {} — INSTANT order forced to "
+                                + "CONFIRMATION_PENDING ({} recent failures)",
+                        customerId, recentFails);
+            }
         }
 
         Order saved = orderRepository.save(order);
 
-        log.info("Order created — id: {}, deliveryModel: {}, zone: {}, status: {}",
+        log.info("Order created — id: {}, model: {}, zone: {}, status: {}",
                 saved.getId(), model, saved.getZone(), saved.getStatus());
 
         return OrderResponse.from(saved);
     }
 
+    private void setInitialStatus(Order order, DeliveryModel model) {
+        switch (model) {
+            case INSTANT -> {
+                // Assign immediately — no WhatsApp needed
+                order.setStatus(OrderStatus.CONFIRMED);
+                order.setSlaDeadline(OffsetDateTime.now().plusMinutes(30));
+            }
+            case PARCEL -> {
+                // WhatsApp sent on morning of slotDate by OutForDeliveryScheduler
+                order.setStatus(OrderStatus.CREATED);
+                order.setSlaDeadline(order.getSlotDate()
+                        .atTime(18, 0)
+                        .atOffset(ZoneOffset.ofHoursMinutes(5, 30)));
+            }
+            case PICKUP_RETURN -> {
+                order.setStatus(OrderStatus.CONFIRMED);
+                order.setSlaDeadline(OffsetDateTime.now().plusHours(48));
+            }
+        }
+    }
+
+    private void validateSlotRules(DeliveryModel model, CreateOrderRequest request) {
+        switch (model) {
+            case INSTANT -> {
+                if (request.slotLabel() != null || request.slotDate() != null) {
+                    throw new ApiException("INSTANT orders do not use slot booking.");
+                }
+            }
+            case PARCEL -> {
+                if (request.slotDate() == null) {
+                    throw new ApiException("PARCEL orders require a slotDate.");
+                }
+                if (request.slotLabel() != null) {
+                    throw new ApiException("PARCEL orders do not use time-window slots. "
+                            + "Customer chooses slot via WhatsApp.");
+                }
+            }
+            case PICKUP_RETURN -> {
+                // Slot optional
+            }
+        }
+    }
+
     @Override
     @Transactional
     public OrderResponse assignRider(Long orderId,
-            AssignRiderRequest request,
-            Long adminId) {
+                                     AssignRiderRequest request,
+                                     Long adminId) {
 
         log.info("Assigning rider — orderId: {}, riderId: {}, adminId: {}",
                 orderId, request.riderId(), adminId);
 
         Order order = findOrderById(orderId);
 
+        // ── Status Guard ────────────────────────────────────────────────────
+        // Only CONFIRMED or FAILED are valid starting states.
+        // CREATED → ASSIGNED is forbidden — confirmation flow must complete first.
         if (order.getStatus() != OrderStatus.CONFIRMED
-                && order.getStatus() != OrderStatus.FAILED
-                && order.getStatus() != OrderStatus.CREATED) {
-
+                && order.getStatus() != OrderStatus.FAILED) {
             throw new InvalidStatusTransitionException(
                     order.getStatus(), OrderStatus.ASSIGNED);
+        }
+
+        // FAILED → ASSIGNED requires explicit admin reassignment flag.
+        // Prevents automated dispatch from silently grabbing failed orders.
+        if (order.getStatus() == OrderStatus.FAILED
+                && !request.isAdminReassign()) {
+            throw new ApiException(
+                    "Failed orders require explicit admin reassignment. "
+                            + "Set isAdminReassign=true.");
         }
 
         Rider rider = riderRepository.findById(request.riderId())
                 .orElseThrow(() -> new ResourceNotFoundException("Rider", request.riderId()));
 
-        // Capacity check
+        // ── Duplicate Assignment Guard ──────────────────────────────────────
+        if (order.getRider() != null
+                && order.getRider().getId().equals(request.riderId())) {
+            throw new ApiException(
+                    "Rider " + request.riderId()
+                            + " is already assigned to order " + orderId);
+        }
+
+        // ── Capacity Check ──────────────────────────────────────────────────
         if (!rider.canAcceptOrder()) {
             throw new ApiException("Rider is not available: " + request.riderId());
         }
 
-        // Multi-tenant safety
+        // ── Multi-Tenant Safety ─────────────────────────────────────────────
         if (rider.getCompany() == null
-                || !rider.getCompany().getId()
-                        .equals(order.getCompany().getId())) {
-
+                || !rider.getCompany().getId().equals(order.getCompany().getId())) {
             throw new ApiException(
                     "Rider " + request.riderId()
-                            + " does not belong to company "
-                            + order.getCompany().getId());
+                            + " does not belong to company " + order.getCompany().getId());
         }
 
-        // ── Zone Enforcement (Hard Boundary) ─────────────────────────────
-        // Only enforce when both sides have a zone — backward compatible
-        // with legacy orders/riders that predate the zone system.
+        // ── Zone Enforcement ────────────────────────────────────────────────
         if (order.getZone() != null && rider.getZone() != null
                 && !order.getZone().equals(rider.getZone())) {
             throw new ApiException(
-                    "Rider " + rider.getId()
-                            + " belongs to zone " + rider.getZone()
-                            + " and cannot be assigned to order in zone "
-                            + order.getZone());
+                    "Rider zone " + rider.getZone()
+                            + " does not match order zone " + order.getZone());
         }
 
-        // Reset attempt count if reassigning
-        if (order.getStatus() == OrderStatus.FAILED) {
-            log.info("Resetting attempt count for order {}", orderId);
-            order.setAttemptCount(0);
-        }
-
-        // Release old rider
+        // ── Release Old Rider (if different rider being swapped in) ─────────
+        // attemptCount is NEVER reset — history must stay intact for analytics.
         if (order.getRider() != null) {
             order.getRider().decrementActiveOrders();
+            log.info("Released previous rider {} from order {}",
+                    order.getRider().getId(), orderId);
         }
 
-        // Assign new rider
+        if (order.getStatus() == OrderStatus.FAILED) {
+            log.info("Admin reassigning failed order {} — "
+                            + "attemptCount preserved at {} for analytics",
+                    orderId, order.getAttemptCount());
+        }
+
+        // ── Assign ──────────────────────────────────────────────────────────
         order.setRider(rider);
         order.setStatus(OrderStatus.ASSIGNED);
-
         rider.incrementActiveOrders();
 
         log.info("Rider {} assigned to order {}", request.riderId(), orderId);
@@ -274,7 +295,7 @@ public class OrderServiceImpl implements OrderService {
         int maxAttempts = policy.getMaxReschedules();
 
         // ── RIDER RULES ─────────────────────────────────────────────
-        if ("RIDER".equals(role)) {
+        if (Role.RIDER.equals(role)) {
 
             validateRiderOwnership(order, userId);
 
@@ -468,6 +489,149 @@ public class OrderServiceImpl implements OrderService {
         order.setStatus(OrderStatus.CANCELLED);
 
         return OrderResponse.from(order);
+    }
+    // ─────────────────────────────────────────────
+    // GET TODAY ORDERS (RIDER DASHBOARD)
+    // ─────────────────────────────────────────────
+    @Override
+    @Transactional(readOnly = true)
+    public Map<String, List<RiderKpiOrderProjection>> getTodayOrders(Long userId, String role) {
+
+        //  Extract rider
+        Rider rider = riderRepository.findByUserId(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Rider for user", userId));
+
+        if (rider.getZone() == null) {
+            throw new ApiException("Rider zone not configured");
+        }
+
+        LocalDate today = LocalDate.now();
+
+        //  Include IN_TRANSIT also (your improvement ✔)
+        List<OrderStatus> statuses = List.of(
+                OrderStatus.CONFIRMED,
+                OrderStatus.ASSIGNED,
+                OrderStatus.IN_TRANSIT
+        );
+
+        List<RiderKpiOrderProjection> orders =
+                orderRepository.findTodayOrdersForRider(
+                        today,
+                        statuses,
+                        rider.getZone()
+                );
+
+        if (orders.isEmpty()) {
+            log.info("No orders for rider {} today", rider.getId());
+            return Collections.emptyMap();
+        }
+
+        //  Slot ordering (VERY GOOD from your code)
+        Comparator<String> slotOrder = Comparator.comparingInt(slot -> switch (slot) {
+            case "SLOT_9_12" -> 1;
+            case "SLOT_12_3" -> 2;
+            case "SLOT_3_6" -> 3;
+            default -> 99;
+        });
+
+        Map<String, List<RiderKpiOrderProjection>> grouped = orders.stream()
+                .filter(o -> o.getSlotLabel() != null)
+                .sorted(Comparator.comparing(
+                        RiderKpiOrderProjection::getSlotLabel,
+                        slotOrder
+                ))
+                .collect(Collectors.groupingBy(
+                        RiderKpiOrderProjection::getSlotLabel,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+
+        log.info("Rider {} fetched {} orders for today", rider.getId(), orders.size());
+
+        return grouped;
+    }
+    // ─────────────────────────────────────────────
+    // SELF ASSIGN ORDER
+    // ─────────────────────────────────────────────
+    @Override
+    public void assignToSelf(Long orderId, Long userId, String role) {
+
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
+
+        Rider rider = riderRepository.findByUserId(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Rider for user", userId));
+
+        log.info("Assign order {} — userId={}, role={}", orderId, userId, role);
+
+        //  Security check (VERY IMPORTANT)
+        if (role.equals("RIDER") && !rider.getUser().getId().equals(userId)) {
+            throw new ApiException("You can only assign orders to yourself");
+        }
+
+        //  Zone check
+        if (!order.getZone().equals(rider.getZone())) {
+            throw new ApiException("Cannot assign order from different zone");
+        }
+
+        //  Already assigned
+        if (order.getRider() != null) {
+            throw new ApiException("Order already assigned");
+        }
+
+        //  Capacity
+        if (!rider.canAcceptOrder()) {
+            throw new ApiException("Rider capacity full");
+        }
+
+        //  Status
+        if (order.getStatus() != OrderStatus.CONFIRMED) {
+            throw new ApiException("Only CONFIRMED orders can be assigned");
+        }
+
+        //  Assign
+        order.setRider(rider);
+        order.setStatus(OrderStatus.ASSIGNED);
+        rider.incrementActiveOrders();
+
+        log.info("Order {} assigned to rider {}", orderId, rider.getId());
+    }
+
+    @Transactional
+    public void autoAssignRider(Order order, Rider rider) {
+
+        log.info("AutoDispatch — attempting assignment for order {}", order.getId());
+
+        // Only assign if order is CONFIRMED (important)
+        if (order.getStatus() != OrderStatus.CONFIRMED) {
+            log.debug("AutoDispatch skipped — order {} not in CONFIRMED state", order.getId());
+            return;
+        }
+
+        // Capacity check
+        if (!rider.canAcceptOrder()) {
+            log.debug("AutoDispatch skipped — rider {} cannot accept more orders", rider.getId());
+            return;
+        }
+
+        // Zone check
+        if (order.getZone() != null && rider.getZone() != null
+                && !order.getZone().equals(rider.getZone())) {
+            log.debug("AutoDispatch skipped — zone mismatch");
+            return;
+        }
+
+        // Release old rider if any
+        if (order.getRider() != null) {
+            order.getRider().decrementActiveOrders();
+        }
+
+        // Assign
+        order.setRider(rider);
+        order.setStatus(OrderStatus.ASSIGNED);
+        rider.incrementActiveOrders();
+
+        log.info("AutoDispatch — assigned rider {} to order {}", rider.getId(), order.getId());
     }
 
     @Override

@@ -58,8 +58,8 @@ public record OrderResponse(
                                 order.getCompany().getId(),
                                 order.getCompany().getName(),
 
-                                order.getCustomer().getId(),
-                                order.getCustomer().getFullName(),
+                                order.getCustomer() != null ? order.getCustomer().getId() : null,
+                                order.getCustomer() != null ? order.getCustomer().getFullName() : null,
 
                                 order.getRider() != null ? order.getRider().getId() : null,
                                 order.getRider() != null ? order.getRider().getUser().getFullName() : null,

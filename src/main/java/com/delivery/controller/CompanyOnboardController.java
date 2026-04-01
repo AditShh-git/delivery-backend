@@ -14,16 +14,21 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 @Slf4j
 @RestController
 @RequestMapping("/api/company")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('COMPANY')")
+@Tag(name = "Company Onboarding", description = "Endpoints for company self-onboarding")
 public class CompanyOnboardController {
 
         private final CompanyService companyService;
 
         @PostMapping("/onboard")
+        @Operation(summary = "Onboard Company", description = "Submit final details to complete company onboarding")
         public ResponseEntity<CompanyResponse> onboard(
                         Authentication authentication,
                         @RequestBody @Valid CompanyOnboardRequest request) {

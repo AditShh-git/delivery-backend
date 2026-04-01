@@ -10,15 +10,20 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 @RestController
 @RequestMapping("/api/company")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('COMPANY')")
+@Tag(name = "Company Dashboard", description = "Endpoints for company view of dashboard data")
 public class CompanyDashboardController {
 
     private final CompanyService companyService;
 
     @GetMapping("/dashboard")
+    @Operation(summary = "Get Company Dashboard", description = "Retrieve dashboard metrics for the logged-in company")
     public ResponseEntity<CompanyDashboardResponse> getDashboard(
             Authentication authentication) {
 

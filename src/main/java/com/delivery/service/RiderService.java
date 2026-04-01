@@ -4,6 +4,8 @@ import com.delivery.dto.request.CreateRiderRequest;
 import com.delivery.dto.request.UpdatePasswordRequest;
 import com.delivery.dto.request.UpdateRiderRequest;
 import com.delivery.dto.response.RiderResponse;
+import com.delivery.entity.Order;
+import com.delivery.entity.Rider;
 
 public interface RiderService {
     RiderResponse createRider(CreateRiderRequest request,

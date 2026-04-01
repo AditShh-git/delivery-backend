@@ -3,11 +3,16 @@ package com.delivery.service;
 import com.delivery.dto.request.*;
 import com.delivery.dto.response.AttemptHistoryResponse;
 import com.delivery.dto.response.OrderResponse;
+import com.delivery.entity.Order;
 import com.delivery.entity.OrderStatus;
+import com.delivery.entity.Rider;
+import com.delivery.projection.RiderKpiOrderProjection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 
 public interface OrderService {
 
@@ -64,4 +69,10 @@ public interface OrderService {
          * reschedulable.
          */
         OrderResponse rescheduleOrder(Long orderId, Long customerId, RescheduleRequest request);
+
+    void autoAssignRider(Order order, Rider rider);
+
+    Map<String, List<RiderKpiOrderProjection>> getTodayOrders(Long userId, String role);
+
+    void assignToSelf(Long orderId, Long userId, String role);
 }

@@ -26,6 +26,11 @@ public class Zone {
     @Column(nullable = false)
     private String name;
 
+    // ── GPS centroid (set by admin, used for RunSheet nearest-neighbor sort) ──
+    // Nullable — fallback to insertion order when missing.
+    private Double lat;
+    private Double lng;
+
     @Column(nullable = false)
     @Builder.Default
     private boolean isActive = true;

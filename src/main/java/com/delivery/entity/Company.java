@@ -29,8 +29,11 @@ public class Company {
     @Column(nullable = false, unique = true)
     private String email;
 
-    @Enumerated(EnumType.STRING)
-    private DeliveryModel deliveryModel = DeliveryModel.SCHEDULED;
+    @Column(nullable = false)
+    private String zone;
+
+//    @Enumerated(EnumType.STRING)
+//    private DeliveryModel deliveryModel = DeliveryModel.;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

@@ -3,6 +3,7 @@ package com.delivery.repository;
 import com.delivery.entity.DeliveryModel;
 import com.delivery.entity.Order;
 import com.delivery.entity.OrderStatus;
+import com.delivery.projection.RiderKpiOrderProjection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -27,6 +28,10 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
         // RIDER — ALL orders ever assigned (past + present)
         // previous version filtered by status — now removed per your answer
         List<Order> findByRiderId(Long riderId);
+
+    List<Order> findByStatus(OrderStatus status);
+
+    List<Order> findByStatusAndSlotDate(OrderStatus status, LocalDate slotDate);
 
         Page<Order> findBySlaBreachedTrue(Pageable pageable);
 
@@ -78,6 +83,33 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                         """, nativeQuery = true)
         List<Object[]> getZoneHeatmapNative();
 
+    @Query("""
+    SELECT 
+        o.id AS id,
+        o.zone AS zone,
+        o.slotLabel AS slotLabel,
+        o.slotDate AS slotDate,
+        o.deliveryAddress AS deliveryAddress,
+        o.productCategory AS productCategory,
+        c.fullName AS customerName,
+        o.status AS status
+    FROM Order o
+    JOIN o.customer c
+    WHERE o.slotDate = :today
+      AND o.status IN :statuses
+      AND o.zone = :zone
+    ORDER BY o.slotLabel, o.createdAt
+""")
+    List<RiderKpiOrderProjection> findTodayOrdersForRider(
+            @Param("today") LocalDate today,
+            @Param("statuses") List<OrderStatus> statuses,
+            @Param("zone") String zone
+    );
+
         // ── Week 6 Prep ─────────────────────────────────────────────────────────
-        List<Order> findByCompany_DeliveryModelAndStatus(DeliveryModel model, OrderStatus status);
+        // Used by future partner API — scope limited to a single company's delivery model
+        List<Order> findByDeliveryModelAndStatus(
+                DeliveryModel model,
+                OrderStatus status
+        );
 }

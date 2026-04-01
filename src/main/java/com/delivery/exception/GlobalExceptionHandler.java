@@ -1,6 +1,7 @@
 package com.delivery.exception;
 
 import com.delivery.dto.response.ErrorResponse;
+import jakarta.persistence.LockTimeoutException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -106,6 +107,16 @@ public class GlobalExceptionHandler {
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "INTERNAL_SERVER_ERROR",
                 "Something went wrong");
+    }
+
+    @ExceptionHandler(LockTimeoutException.class)
+    public ResponseEntity<ErrorResponse> handleLockTimeout(LockTimeoutException ex) {
+        log.warn("Slot booking lock timeout — concurrent booking attempt");
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "SLOT_LOCK_TIMEOUT",
+                "Slot is currently being booked. Please try again."
+        );
     }
 
     private ResponseEntity<ErrorResponse> buildResponse(

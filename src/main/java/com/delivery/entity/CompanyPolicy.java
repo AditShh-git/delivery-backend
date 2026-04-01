@@ -56,18 +56,6 @@ public class CompanyPolicy {
         private BigDecimal penaltyAmount;
 
         // ─────────────────────────────────────────────
-        // OTP enforcement
-        // ─────────────────────────────────────────────
-
-        /**
-         * When true, DELIVERED / COLLECTED transitions require a verified OTP.
-         * Opt-in per policy row — defaults to false so existing policies are
-         * unaffected.
-         */
-        @Column(name = "requires_otp", nullable = false)
-        private boolean requiresOtp = false;
-
-        // ─────────────────────────────────────────────
         // Pickup checklist
         // ─────────────────────────────────────────────
         @JdbcTypeCode(SqlTypes.JSON)

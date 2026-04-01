@@ -21,6 +21,9 @@ public record CreateCompanyRequest(
         @Email
         String email,
 
+        @NotBlank
+        String zone,
+
         @NotNull
         DeliveryModel deliveryModel,
 

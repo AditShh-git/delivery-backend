@@ -57,6 +57,11 @@ public class Order {
     @Column(name = "delivery_type")
     private DeliveryType deliveryType; // STANDARD | OPEN_BOX — null for PICKUP orders
 
+    // Add this field
+    @Enumerated(EnumType.STRING)
+    @Column(name = "delivery_model", nullable = false)
+    private DeliveryModel deliveryModel;
+
     // ── Ecom integration ────────────────────────────────────────────────
 
     @Column(name = "external_order_id", length = 100)
@@ -90,6 +95,14 @@ public class Order {
     private String zone; // stores pincode
 
     private String landmark; // optional
+
+    // ── GPS coords (set at order creation, used by RunSheet nearest-neighbor sort) ──
+    // Nullable — sort falls back to insertion order when missing.
+    @Column(name = "delivery_lat")
+    private Double deliveryLat;
+
+    @Column(name = "delivery_lng")
+    private Double deliveryLng;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "items", columnDefinition = "jsonb")

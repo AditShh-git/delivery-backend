@@ -1,5 +1,6 @@
 package com.delivery.dto.request;
 
+import com.delivery.entity.DeliveryModel;
 import com.delivery.entity.DeliveryType;
 import com.delivery.entity.OrderItem;
 import com.delivery.entity.OrderType;
@@ -18,11 +19,13 @@ public record CreateOrderRequest(
         String externalOrderId,
 
         @NotNull
+        DeliveryModel deliveryModel,    // INSTANT | PARCEL | SCHEDULED | PICKUP_RETURN
+
+        @NotNull
         OrderType orderType,            // DELIVERY | PICKUP
 
         DeliveryType deliveryType,      // STANDARD | OPEN_BOX — null for PICKUP
 
-        // ── Slot ─────────────────────────────────────────────────────────
         String slotLabel,
         LocalDate slotDate,
 
@@ -32,11 +35,10 @@ public record CreateOrderRequest(
         @NotBlank
         String deliveryAddress,
 
-        // ── Zone System ───────────────────────────────────────────────────
         @NotBlank
-        String pincode,      // REQUIRED — system boundary (stored in orders.zone)
+        String pincode,
 
-        String landmark,     // OPTIONAL — display only
+        String landmark,
 
         List<OrderItem> items,
 
@@ -46,6 +48,7 @@ public record CreateOrderRequest(
 
     public CreateOrderRequest {
 
+        // ── DeliveryType rules ───────────────────────────────────────────
         if (orderType == OrderType.DELIVERY && deliveryType == null) {
             throw new IllegalArgumentException(
                     "deliveryType is required for DELIVERY orders (STANDARD or OPEN_BOX).");
@@ -56,8 +59,39 @@ public record CreateOrderRequest(
                     "deliveryType must be null for PICKUP orders.");
         }
 
+        // ── Pincode ──────────────────────────────────────────────────────
         if (pincode == null || pincode.isBlank()) {
             throw new IllegalArgumentException("Pincode is required.");
+        }
+
+        // ── Slot rules per DeliveryModel ────────────────────────────────
+        if (deliveryModel != null) {
+            switch (deliveryModel) {
+
+                case INSTANT -> {
+                    // No slot needed — assigned immediately
+                    if (slotDate != null || slotLabel != null) {
+                        throw new IllegalArgumentException(
+                                "INSTANT orders do not use slotDate or slotLabel.");
+                    }
+                }
+
+                case PARCEL -> {
+                    // Needs a delivery date — slot time chosen later via WhatsApp
+                    if (slotDate == null) {
+                        throw new IllegalArgumentException(
+                                "PARCEL orders require a slotDate (expected delivery date).");
+                    }
+                    if (slotDate.isBefore(java.time.LocalDate.now())) {
+                        throw new IllegalArgumentException(
+                                "slotDate cannot be in the past.");
+                    }
+                }
+
+                case PICKUP_RETURN -> {
+                    // Slot optional — customer comes to store
+                }
+            }
         }
     }
 }

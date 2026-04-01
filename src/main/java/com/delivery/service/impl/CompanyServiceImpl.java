@@ -14,6 +14,8 @@ import com.delivery.repository.CompanyRepository;
 import com.delivery.repository.RiderRepository;
 import com.delivery.repository.UserRepository;
 import com.delivery.service.CompanyService;
+import com.delivery.slot.SlotCapacity;
+import com.delivery.slot.SlotCapacityRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -24,6 +26,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -37,6 +41,7 @@ public class CompanyServiceImpl implements CompanyService {
     private final UserRepository userRepository;
     private final RiderRepository riderRepository;
     private final CompanyPolicyRepository policyRepository;
+    private final SlotCapacityRepository slotCapacityRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -105,10 +110,12 @@ public class CompanyServiceImpl implements CompanyService {
         company.setName(normalizedName);
         company.setContact(normalizedContact);
         company.setEmail(normalizedEmail);
-        company.setDeliveryModel(request.deliveryModel()); // REQUIRED in request
+        company.setZone(request.zone());
+//        company.setDeliveryModel(request.deliveryModel()); // REQUIRED in request
         company.setStatus(CompanyStatus.ACTIVE); // Enterprise auto-active
 
         companyRepository.save(company);
+        createDefaultSlots(company);
 
         log.info("Enterprise company created with id={}", company.getId());
 
@@ -136,6 +143,53 @@ public class CompanyServiceImpl implements CompanyService {
         policy.setPickupChecklist(request.pickupChecklist());
 
         return policy;
+    }
+
+    private void createDefaultSlots(Company company) {
+
+        int defaultCapacity = 5; // you can later take from request
+
+        List<String> slots = List.of("9AM-12PM", "12PM-3PM", "3PM-6PM");
+
+        String zone = company.getZone();
+
+        LocalDate today = LocalDate.now();
+
+        List<SlotCapacity> slotCapacities = new ArrayList<>();
+
+        for (int i = 0; i < 7; i++) {
+
+            LocalDate date = today.plusDays(i);
+
+            for (String slot : slots) {
+
+                boolean exists = slotCapacityRepository
+                        .existsByCompanyIdAndZoneAndSlotDateAndSlotLabel(
+                                company.getId(),
+                                zone,
+                                date,
+                                slot
+                        );
+
+                if (!exists) {
+                    SlotCapacity sc = new SlotCapacity();
+                    sc.setCompany(company);
+                    sc.setZone(zone);
+                    sc.setSlotDate(date);
+                    sc.setSlotLabel(slot);
+                    sc.setCapacity(defaultCapacity);
+                    sc.setBookedCount(0);
+                    sc.setCreatedAt(OffsetDateTime.now());
+                    sc.setUpdatedAt(OffsetDateTime.now());
+
+                    slotCapacities.add(sc);
+                }
+            }
+        }
+
+        slotCapacityRepository.saveAll(slotCapacities);
+
+        log.info("Auto slots created for companyId={} zone={}", company.getId(), zone);
     }
 
     @Override
@@ -264,7 +318,7 @@ public class CompanyServiceImpl implements CompanyService {
         }
 
         // Set delivery model
-        company.setDeliveryModel(request.deliveryModel());
+//        company.setDeliveryModel(request.deliveryModel());
 
         // Remove old policies if re-onboarding
         policyRepository.deleteByCompanyId(companyId);
@@ -275,6 +329,7 @@ public class CompanyServiceImpl implements CompanyService {
                     company.getName(),
                     company.getContact(),
                     company.getEmail(),
+                    company.getZone(),
                     request.deliveryModel(),
                     request.missedSlotAction(),
                     request.maxReschedules(),

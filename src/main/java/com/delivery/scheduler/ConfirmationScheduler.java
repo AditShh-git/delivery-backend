@@ -1,5 +1,6 @@
 package com.delivery.scheduler;
 
+import com.delivery.entity.DeliveryModel;
 import com.delivery.entity.Order;
 import com.delivery.entity.OrderStatus;
 import com.delivery.repository.OrderRepository;
@@ -23,35 +24,53 @@ public class ConfirmationScheduler {
     private final OrderRepository orderRepository;
 
     // ─────────────────────────────────────────────
-    // 6:00 AM — Send Confirmation for TOMORROW's orders
+    // 6:00 AM — Send confirmation for today's deliveries
+    // (orders prepared on previous day)
     // ─────────────────────────────────────────────
     @Scheduled(cron = "0 0 6 * * ?")
     @Transactional
     public void sendMorningConfirmations() {
 
-        // Target orders slotted for tomorrow, not today.
-        // Today's orders are too late to reschedule meaningfully.
-        LocalDate tomorrow = LocalDate.now().plusDays(1);
+        LocalDate today = LocalDate.now();
 
         List<Order> orders = orderRepository.findByStatusAndSlotDateAndCustomerConfirmedFalse(
-                OrderStatus.CREATED,
-                tomorrow);
+                OrderStatus.OUT_FOR_DELIVERY_TOMORROW,
+                today
+        );
+
+        if (orders.isEmpty()) {
+            log.debug("ConfirmationScheduler — no orders for today {}", today);
+            return;
+        }
+
+        log.info("ConfirmationScheduler — processing {} orders for {}", orders.size(), today);
 
         for (Order order : orders) {
+            try {
 
-            // Skip orders already pre-flagged by the smart risk rule —
-            // they're already in CONFIRMATION_PENDING with confirmationSentAt set.
-            if (order.getStatus() == OrderStatus.CONFIRMATION_PENDING) {
-                continue;
+                //  Only PARCEL orders
+                if (order.getDeliveryModel() != DeliveryModel.PARCEL) {
+                    continue;
+                }
+
+                //  Idempotency safety
+                if (order.getStatus() != OrderStatus.OUT_FOR_DELIVERY_TOMORROW) {
+                    continue;
+                }
+
+                //  Move to confirmation stage
+                order.setStatus(OrderStatus.CONFIRMATION_PENDING);
+                order.setConfirmationSentAt(OffsetDateTime.now());
+                order.setReminderSent(false);
+
+                log.info("Order {} moved to CONFIRMATION_PENDING", order.getId());
+
+                // TODO: send WhatsApp confirmation message
+
+            } catch (Exception e) {
+                log.warn("ConfirmationScheduler — failed for order {} — {}",
+                        order.getId(), e.getMessage());
             }
-
-            order.setStatus(OrderStatus.CONFIRMATION_PENDING);
-            order.setConfirmationSentAt(OffsetDateTime.now());
-            order.setReminderSent(false);
-
-            log.info("6AM confirmation sent for order {} (slotDate={})", order.getId(), tomorrow);
-
-            // TODO: wire real WhatsApp/SMS provider (Week 9)
         }
     }
 
@@ -65,55 +84,86 @@ public class ConfirmationScheduler {
         List<Order> pending = orderRepository.findByStatusAndCustomerConfirmedFalse(
                 OrderStatus.CONFIRMATION_PENDING);
 
+        if (pending.isEmpty()) {
+            log.debug("ConfirmationScheduler — no pending confirmations");
+            return;
+        }
+
         for (Order order : pending) {
+            try {
 
-            if (order.getConfirmationSentAt() == null)
-                continue;
+                //  Only PARCEL orders
+                if (order.getDeliveryModel() != DeliveryModel.PARCEL) {
+                    continue;
+                }
 
-            boolean twelveHoursPassed = OffsetDateTime.now()
-                    .isAfter(order.getConfirmationSentAt().plusHours(12));
+                //  Safety check
+                if (order.getStatus() != OrderStatus.CONFIRMATION_PENDING) {
+                    continue;
+                }
 
-            if (!twelveHoursPassed)
-                continue;
+                if (order.getConfirmationSentAt() == null) {
+                    continue;
+                }
 
-            // ─────────────────────────────
-            // FIRST REMINDER (same day)
-            // ─────────────────────────────
-            if (!order.getReminderSent()) {
+                boolean twelveHoursPassed = OffsetDateTime.now()
+                        .isAfter(order.getConfirmationSentAt().plusHours(12));
 
-                log.info("12-hour reminder sent for order {}", order.getId());
+                if (!twelveHoursPassed) {
+                    continue;
+                }
 
-                order.setReminderSent(true);
-                continue;
+                // ─────────────────────────────
+                // FIRST REMINDER
+                // ─────────────────────────────
+                if (!order.getReminderSent()) {
+
+                    log.info("Reminder sent for order {}", order.getId());
+
+                    order.setReminderSent(true);
+                    continue;
+                }
+
+                // ─────────────────────────────
+                // RESCHEDULE (ONLY ONCE)
+                // ─────────────────────────────
+                int ignoredDays = order.getConfirmationAttempts() + 1;
+                order.setConfirmationAttempts(ignoredDays);
+
+                if (ignoredDays <= 1) {
+
+                    //  7-day limit check
+                    if (order.getSlotDate().isAfter(LocalDate.now().plusDays(7))) {
+                        log.warn("Order {} exceeded max reschedule window, cancelling",
+                                order.getId());
+                        order.setStatus(OrderStatus.CANCELLED);
+                        continue;
+                    }
+
+                    order.setSlotDate(order.getSlotDate().plusDays(1));
+                    order.setStatus(OrderStatus.CREATED);
+                    order.setConfirmationSentAt(null);
+                    order.setReminderSent(false);
+
+                    log.warn("Order {} rescheduled to next day (attempt {})",
+                            order.getId(), ignoredDays);
+
+                    continue;
+                }
+
+                // ─────────────────────────────
+                // AUTO-CANCEL
+                // ─────────────────────────────
+                log.error("Order {} auto-cancelled after ignored confirmation",
+                        order.getId());
+
+                order.setStatus(OrderStatus.CANCELLED);
+                order.setAutoCancelled(true);
+
+            } catch (Exception e) {
+                log.warn("ConfirmationScheduler — failed for order {} — {}",
+                        order.getId(), e.getMessage());
             }
-
-            // ─────────────────────────────
-            // DAY IGNORED → Auto-Reschedule
-            // ─────────────────────────────
-            int ignoredDays = order.getConfirmationAttempts() + 1;
-            order.setConfirmationAttempts(ignoredDays);
-
-            if (ignoredDays < 3) {
-
-                log.warn("Rescheduling order {} to next day (attempt {})",
-                        order.getId(), ignoredDays);
-
-                order.setSlotDate(order.getSlotDate().plusDays(1));
-                order.setStatus(OrderStatus.CREATED);
-                order.setConfirmationSentAt(null);
-                order.setReminderSent(false);
-
-                continue;
-            }
-
-            // ─────────────────────────────
-            // AUTO-CANCEL AFTER 3 IGNORED DAYS
-            // ─────────────────────────────
-            log.error("Auto-cancelling order {} after 3 ignored confirmations",
-                    order.getId());
-
-            order.setStatus(OrderStatus.CANCELLED);
-            order.setAutoCancelled(true);
         }
     }
 }
