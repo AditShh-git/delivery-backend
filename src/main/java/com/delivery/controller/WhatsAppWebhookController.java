@@ -8,10 +8,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 @Slf4j
 @RestController
 @RequestMapping("/api/webhook")
 @RequiredArgsConstructor
+@Tag(name = "WhatsApp Webhook", description = "Endpoint for processing WhatsApp delivery replies")
 public class WhatsAppWebhookController {
 
     private final WhatsAppWebhookService webhookService;
@@ -20,6 +24,7 @@ public class WhatsAppWebhookController {
     private String webhookSecret;
 
     @PostMapping("/whatsapp")
+    @Operation(summary = "Handle WhatsApp Reply", description = "Process incoming user actions from WhatsApp messages")
     public ResponseEntity<String> handleReply(
             @RequestParam Long orderId,
             @RequestParam String action,
