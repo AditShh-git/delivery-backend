@@ -2,6 +2,7 @@ package com.delivery.config;
 
 import com.delivery.security.CustomUserDetailsService;
 import com.delivery.security.JwtAuthFilter;
+import com.delivery.security.OnboardingFilter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
@@ -31,6 +32,7 @@ public class SecurityConfig {
     private final CustomUserDetailsService   userDetailsService;
     private final CustomAccessDeniedHandler  accessDeniedHandler;
     private final CustomAuthEntryPoint       authEntryPoint;
+    private final OnboardingFilter           onboardingFilter;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -58,7 +60,8 @@ public class SecurityConfig {
                 )
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthFilter,
-                        UsernamePasswordAuthenticationFilter.class);
+                        UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(onboardingFilter, JwtAuthFilter.class);
 
         return http.build();
     }

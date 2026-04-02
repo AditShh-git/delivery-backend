@@ -118,6 +118,21 @@ public class Order {
     @Column(nullable = false)
     private Integer attemptCount = 0; // changed from Short — no reason to be awkward here
 
+    // ── Policy snapshot (stamped at order creation) ───────────────────────
+    // Denormalized from CompanyPolicy at the time the order was placed.
+    // Benefits:
+    //   • Audit-safe: immutable snapshot, even if policy changes later
+    //   • Faster reads: no policy JOIN needed on status updates
+    //   • Self-contained order history
+    // Nullable for backward compat with orders created before this migration.
+
+    @Column(name = "policy_max_reschedules")
+    private Integer policyMaxReschedules;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "policy_missed_slot_action", length = 50)
+    private MissedSlotAction policyMissedSlotAction;
+
     @Column(name = "sla_deadline")
     private OffsetDateTime slaDeadline;
 
