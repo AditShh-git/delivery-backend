@@ -26,10 +26,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -111,15 +113,24 @@ public class CompanyServiceImpl implements CompanyService {
         company.setContact(normalizedContact);
         company.setEmail(normalizedEmail);
         company.setZone(request.zone());
-//        company.setDeliveryModel(request.deliveryModel()); // REQUIRED in request
-        company.setStatus(CompanyStatus.ACTIVE); // Enterprise auto-active
+        company.setDeliveryModel(request.deliveryModel());
+        company.setStatus(CompanyStatus.ACTIVE);
+        company.setOnboarded(true);
 
         companyRepository.save(company);
+
         createDefaultSlots(company);
 
-        log.info("Enterprise company created with id={}", company.getId());
+        createPolicies(
+                company,
+                request.productCategories(),
+                request.missedSlotAction(),
+                request.maxReschedules(),
+                request.penaltyAmount(),
+                request.pickupChecklist()
+        );
 
-        createPolicies(company, request);
+        log.info("Enterprise company created with id={}", company.getId());
 
         return buildCompanyResponse(company);
     }
@@ -206,38 +217,48 @@ public class CompanyServiceImpl implements CompanyService {
         return buildCompanyResponse(company);
     }
 
-    private void createPolicies(Company company, CreateCompanyRequest request) {
-
-        String productCategory = request.productCategory() != null
-                ? request.productCategory().trim().toUpperCase()
-                : "DEFAULT";
+    private void createPolicies(
+            Company company,
+            List<String> categories,
+            String missedSlotActionStr,
+            Integer maxReschedules,
+            BigDecimal penaltyAmount,
+            Map<String, List<String>> pickupChecklist
+    ) {
 
         MissedSlotAction missedSlotAction;
+
         try {
-            missedSlotAction = request.missedSlotAction() != null
-                    ? MissedSlotAction.valueOf(request.missedSlotAction().trim().toUpperCase())
+            missedSlotAction = missedSlotActionStr != null
+                    ? MissedSlotAction.valueOf(missedSlotActionStr.trim().toUpperCase())
                     : MissedSlotAction.RESCHEDULE;
         } catch (IllegalArgumentException ex) {
             throw new ApiException("Invalid missedSlotAction value");
         }
 
-        if (missedSlotAction == MissedSlotAction.CHARGE_FEE
-                && request.penaltyAmount() == null) {
+        if (missedSlotAction == MissedSlotAction.CHARGE_FEE && penaltyAmount == null) {
             throw new ApiException("Penalty amount required when action is CHARGE_FEE");
         }
 
         List<CompanyPolicy> policies = new ArrayList<>();
 
-        for (DeliveryType type : DeliveryType.values()) {
+        for (String category : categories) {
 
-            CompanyPolicy policy = buildPolicy(
-                    company,
-                    productCategory,
-                    type,
-                    missedSlotAction,
-                    request);
+            String normalizedCategory = category.trim().toUpperCase();
 
-            policies.add(policy);
+            for (DeliveryType type : DeliveryType.values()) {
+
+                CompanyPolicy policy = new CompanyPolicy();
+                policy.setCompany(company);
+                policy.setProductCategory(normalizedCategory);
+                policy.setDeliveryType(type);
+                policy.setMissedSlotAction(missedSlotAction);
+                policy.setMaxReschedules(maxReschedules != null ? maxReschedules : 3);
+                policy.setPenaltyAmount(penaltyAmount);
+                policy.setPickupChecklist(pickupChecklist);
+
+                policies.add(policy);
+            }
         }
 
         policyRepository.saveAll(policies);
@@ -308,37 +329,34 @@ public class CompanyServiceImpl implements CompanyService {
 
     @Override
     public CompanyResponse onboardCompany(Long companyId,
-            CompanyOnboardRequest request) {
+                                          CompanyOnboardRequest request) {
 
         Company company = companyRepository.findById(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Company", companyId));
 
-        if (company.getStatus() != CompanyStatus.ACTIVE) {
-            throw new ApiException("Company must be ACTIVE before onboarding.");
+        if (company.isOnboarded()) {
+            throw new ApiException("Company already onboarded");
         }
-
-        // Set delivery model
-//        company.setDeliveryModel(request.deliveryModel());
 
         // Remove old policies if re-onboarding
         policyRepository.deleteByCompanyId(companyId);
 
-        for (String category : request.productCategories()) {
+        // Create new policies
+        createPolicies(
+                company,
+                request.productCategories(),
+                request.missedSlotAction(),
+                request.maxReschedules(),
+                request.penaltyAmount(),
+                request.pickupChecklist()
+        );
 
-            CreateCompanyRequest tempRequest = new CreateCompanyRequest(
-                    company.getName(),
-                    company.getContact(),
-                    company.getEmail(),
-                    company.getZone(),
-                    request.deliveryModel(),
-                    request.missedSlotAction(),
-                    request.maxReschedules(),
-                    request.penaltyAmount(),
-                    request.pickupChecklist(),
-                    category);
+        // Set delivery model
+        company.setDeliveryModel(request.deliveryModel());
 
-            createPolicies(company, tempRequest);
-        }
+        // Activate company
+        company.setOnboarded(true);
+        company.setStatus(CompanyStatus.ACTIVE);
 
         return buildCompanyResponse(company);
     }

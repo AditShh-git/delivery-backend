@@ -149,18 +149,14 @@ public class AuthServiceImpl implements AuthService {
         return generateAuthResponse(user, "Login successful — welcome back " + user.getFullName());
     }
 
-    private AuthResponse generateAuthResponse(com.delivery.entity.User user, String message) {
+    private AuthResponse generateAuthResponse(User user, String message) {
+
         List<String> roles = user.getRoles().stream()
                 .map(r -> "ROLE_" + r.getName())
                 .toList();
 
-        var springUser = org.springframework.security.core.userdetails.User.builder()
-                .username(user.getEmail())
-                .password(user.getPassword())
-                .authorities(roles.stream().map(SimpleGrantedAuthority::new).toList())
-                .build();
 
-        String token = jwtUtils.generateToken(springUser);
+        String token = jwtUtils.generateToken(user);
 
         log.debug("Token generated for: {} | roles: {}", user.getEmail(), roles);
 

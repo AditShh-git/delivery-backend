@@ -12,3 +12,8 @@ spring:
     redis:
       host: localhost
       port: 6379
+
+twilio:
+  accountSid: ${TWILIO_ACCOUNT_SID}
+  authToken: ${TWILIO_AUTH_TOKEN}
+  whatsappFrom: whatsapp:+14155238886

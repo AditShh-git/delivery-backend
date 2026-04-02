@@ -32,8 +32,12 @@ public class Company {
     @Column(nullable = false)
     private String zone;
 
-//    @Enumerated(EnumType.STRING)
-//    private DeliveryModel deliveryModel = DeliveryModel.;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = true)
+    private DeliveryModel deliveryModel;
+
+    @Column(nullable = false)
+    private boolean onboarded = false;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

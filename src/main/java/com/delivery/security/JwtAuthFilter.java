@@ -47,21 +47,40 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
 
         Claims claims = jwtUtils.extractClaims(token);
+
         String email = claims.getSubject();
+
         @SuppressWarnings("unchecked")
         List<String> roles = (List<String>) claims.get("roles", List.class);
 
-        if (roles == null || roles.isEmpty()) {
-            log.warn("Token has no roles for user: {}", email);
-            filterChain.doFilter(request, response);
-            return;
-        }
+//  NEW CLAIMS
+        Boolean onboarded   = claims.get("onboarded", Boolean.class);
+        Long companyId      = claims.get("companyId", Long.class);
+        String zone         = claims.get("zone", String.class);
+        Boolean riderOnDuty = claims.get("riderOnDutySnapshot", Boolean.class);
 
+// authorities
         var authorities = roles.stream()
                 .map(SimpleGrantedAuthority::new)
                 .toList();
 
-        var auth = new UsernamePasswordAuthenticationToken(email, null, authorities);
+//  CREATE CUSTOM PRINCIPAL
+        CustomUserPrincipal principal = new CustomUserPrincipal(
+                email,
+                authorities,
+                onboarded != null && onboarded,
+                companyId,
+                zone,
+                riderOnDuty
+        );
+
+//  SET AUTHENTICATION WITH PRINCIPAL
+        var auth = new UsernamePasswordAuthenticationToken(
+                principal,
+                null,
+                authorities
+        );
+
         SecurityContextHolder.getContext().setAuthentication(auth);
 
         log.debug("Authenticated: {} | roles: {}", email, roles);

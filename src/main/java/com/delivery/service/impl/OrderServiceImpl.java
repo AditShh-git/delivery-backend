@@ -7,6 +7,7 @@ import com.delivery.entity.*;
 import com.delivery.exception.*;
 import com.delivery.projection.RiderKpiOrderProjection;
 import com.delivery.repository.*;
+import com.delivery.security.CustomUserPrincipal;
 import com.delivery.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,7 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +38,7 @@ public class OrderServiceImpl implements OrderService {
     private final AttemptHistoryRepository attemptHistoryRepository;
     private final ZoneRepository zoneRepository;
     private final DeliveryOtpRepository deliveryOtpRepository;
+    private final com.delivery.slot.SlotCapacityRepository slotCapacityRepository;
 
     // ─── CREATE ────────────────────────────────────────────────────────────
 
@@ -44,14 +47,17 @@ public class OrderServiceImpl implements OrderService {
     @CacheEvict(value = { "adminDashboard", "orderTrend", "zoneHeatmap" }, allEntries = true)
     public OrderResponse createOrder(Long customerId, CreateOrderRequest request) {
 
-        log.info("Creating order — customerId: {}, companyId: {}",
-                customerId, request.companyId());
+        CustomUserPrincipal principal = getPrincipal();
+
+        Long companyId = principal.getCompanyId();
+
+        log.info("Creating order — customerId: {}, companyId: {}", customerId, companyId);
 
         User customer = userRepository.findById(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", customerId));
 
-        Company company = companyRepository.findById(request.companyId())
-                .orElseThrow(() -> new ResourceNotFoundException("Company", request.companyId()));
+        Company company = companyRepository.findById(companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Company", companyId));
 
         Zone zone = zoneRepository
                 .findByNameAndIsActiveTrue(request.pincode())
@@ -60,10 +66,42 @@ public class OrderServiceImpl implements OrderService {
 
         DeliveryModel model = request.deliveryModel();
 
-        // ── Slot Rules ────────────────────────────────────────────────────────
         validateSlotRules(model, request);
 
-        // ── Build Order ───────────────────────────────────────────────────────
+        // ── Policy pre-validation + snapshot capture ────────────────────────────────
+        // Fail fast: surface missing policy at creation, not at first status update.
+        // Capture the policy object so we can stamp a snapshot onto the order.
+        // The snapshot is audit-safe (immutable) and avoids repeated policy JOINs.
+        CompanyPolicy policy = null;
+        if (request.orderType() == com.delivery.entity.OrderType.DELIVERY
+                && request.deliveryType() != null) {
+            policy = companyPolicyRepository
+                    .findByCompanyIdAndProductCategoryAndDeliveryType(
+                            companyId,
+                            request.productCategory(),
+                            request.deliveryType())
+                    .orElseThrow(() -> new ApiException(
+                            "No delivery policy configured for company " + companyId
+                                    + " | product: " + request.productCategory()
+                                    + " | deliveryType: " + request.deliveryType()
+                                    + ". Contact your admin to configure a company policy first."));
+        } else if (request.orderType() == com.delivery.entity.OrderType.PICKUP) {
+            policy = companyPolicyRepository
+                    .findByCompanyIdAndProductCategory(
+                            companyId,
+                            request.productCategory())
+                    .orElseThrow(() -> new ApiException(
+                            "No pickup policy configured for company " + companyId
+                                    + " | product: " + request.productCategory()
+                                    + ". Contact your admin to configure a company policy first."));
+        }
+
+        // ── Slot capacity check (PARCEL only) ─────────────────────────────────────
+        // Uses a SELECT FOR UPDATE lock to prevent concurrent slot double-booking.
+        if (model == DeliveryModel.PARCEL && request.slotDate() != null) {
+            bookSlotCapacity(companyId, zone.getName(), request.slotDate(), request.slotLabel());
+        }
+
         Order order = new Order();
         order.setCustomer(customer);
         order.setCompany(company);
@@ -82,26 +120,17 @@ public class OrderServiceImpl implements OrderService {
                 request.callBeforeArrival() != null && request.callBeforeArrival());
         order.setAttemptCount(0);
 
-        // ── Status + SLA — single source of truth ────────────────────────────
-        setInitialStatus(order, model);
-
-        // ── Smart Risk Override ───────────────────────────────────────────────
-        // High-risk customers always get confirmation step regardless of model.
-        // Only applies to INSTANT — PARCEL/SCHEDULED already have confirmation.
-        if (model == DeliveryModel.INSTANT) {
-            long recentFails = attemptHistoryRepository
-                    .countRecentDeliveryFailuresByCustomer(
-                            customerId,
-                            OffsetDateTime.now().minusDays(30));
-
-            if (recentFails >= 2) {
-                order.setStatus(OrderStatus.CONFIRMATION_PENDING);
-                order.setConfirmationSentAt(OffsetDateTime.now());
-                log.warn("High-risk customer {} — INSTANT order forced to "
-                                + "CONFIRMATION_PENDING ({} recent failures)",
-                        customerId, recentFails);
-            }
+        // ── Policy snapshot stamp ───────────────────────────────────────────────
+        // Immutable at order creation. Policy may change later without affecting
+        // historical orders. Status-update logic can read from the order directly.
+        if (policy != null) {
+            order.setPolicyMaxReschedules(policy.getMaxReschedules());
+            order.setPolicyMissedSlotAction(policy.getMissedSlotAction());
+            log.debug("Policy snapshot stamped — maxReschedules={}, missedSlotAction={}",
+                    policy.getMaxReschedules(), policy.getMissedSlotAction());
         }
+
+        setInitialStatus(order, model);
 
         Order saved = orderRepository.save(order);
 
@@ -109,6 +138,46 @@ public class OrderServiceImpl implements OrderService {
                 saved.getId(), model, saved.getZone(), saved.getStatus());
 
         return OrderResponse.from(saved);
+    }
+
+    // ── Pessimistic slot-capacity booking ─────────────────────────────────────────
+    //
+    // Uses a SELECT FOR UPDATE row-level lock so that concurrent createOrder()
+    // calls for the same slot date/label cannot both succeed when only 1 spot
+    // remains. The containing @Transactional ensures the lock is released on
+    // commit or rollback.
+
+    private void bookSlotCapacity(Long companyId, String zone,
+                                  java.time.LocalDate slotDate, String slotLabel) {
+
+        // slotLabel is nullable for PARCEL (customer picks via WhatsApp later)
+        // → skip capacity check if slotLabel not yet chosen
+        if (slotLabel == null || slotLabel.isBlank()) {
+            log.debug("Slot capacity check skipped — slotLabel not provided yet (PARCEL pre-booking)");
+            return;
+        }
+
+        com.delivery.slot.SlotCapacity slot = slotCapacityRepository
+                .findByCompanyIdAndZoneAndSlotDateAndSlotLabelWithLock(
+                        companyId, zone, slotDate, slotLabel)
+                .orElseThrow(() -> new ApiException(
+                        "Slot not configured: company=" + companyId
+                                + " zone=" + zone
+                                + " date=" + slotDate
+                                + " label=" + slotLabel
+                                + ". Ask your admin to create this slot first."));
+
+        if (slot.getBookedCount() >= slot.getCapacity()) {
+            throw new ApiException(
+                    "Slot '" + slotLabel + "' on " + slotDate
+                            + " is fully booked (capacity: " + slot.getCapacity() + ").");
+        }
+
+        slot.setBookedCount(slot.getBookedCount() + 1);
+
+        log.info("Slot booked — company={}, zone={}, date={}, label={}, booked={}/{}",
+                companyId, zone, slotDate, slotLabel,
+                slot.getBookedCount(), slot.getCapacity());
     }
 
     private void setInitialStatus(Order order, DeliveryModel model) {
@@ -786,10 +855,10 @@ public class OrderServiceImpl implements OrderService {
             }
 
             case "COMPANY" -> {
-                User user = userRepository.findById(userId)
-                        .orElseThrow(() -> new ResourceNotFoundException("User", userId));
-                spec = spec
-                        .and((root, query, cb) -> cb.equal(root.get("company").get("id"), user.getCompany().getId()));
+                CustomUserPrincipal principal = getPrincipal();
+
+                spec = spec.and((root, query, cb) ->
+                        cb.equal(root.get("company").get("id"), principal.getCompanyId()));
             }
 
             default -> throw new ApiException("Unknown role: " + role);
@@ -831,17 +900,15 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponse cancelOrder(Long orderId,
-            Long userId,
-            String role) {
+                                     Long userId,
+                                     String role) {
 
         Order order = findOrderById(orderId);
 
-        // ADMIN can cancel anytime
-        // COMPANY can cancel only their own orders
         if ("COMPANY".equals(role)) {
-            if (!order.getCompany().getId()
-                    .equals(getCompanyFromUser(userId).getId())) {
+            CustomUserPrincipal principal = getPrincipal();
 
+            if (!order.getCompany().getId().equals(principal.getCompanyId())) {
                 throw new ApiException("You cannot cancel another company's order.");
             }
         }
@@ -852,7 +919,6 @@ public class OrderServiceImpl implements OrderService {
             throw new ApiException("Delivered/Collected orders cannot be cancelled.");
         }
 
-        // Auto free rider if assigned
         if (order.getRider() != null) {
             Rider rider = order.getRider();
             rider.decrementActiveOrders();
@@ -974,6 +1040,13 @@ public class OrderServiceImpl implements OrderService {
 
     // ─── PRIVATE HELPERS ───────────────────────────────────────────────────
 
+    private CustomUserPrincipal getPrincipal() {
+        return (CustomUserPrincipal) SecurityContextHolder
+                .getContext()
+                .getAuthentication()
+                .getPrincipal();
+    }
+
     private Order findOrderById(Long orderId) {
         return orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
@@ -1013,10 +1086,8 @@ public class OrderServiceImpl implements OrderService {
                 order.getCustomer().getId().equals(userId);
 
             case "COMPANY" -> {
-                User user = userRepository.findById(userId)
-                        .orElseThrow(() -> new ResourceNotFoundException("User", userId));
-                yield user.getCompany() != null
-                        && user.getCompany().getId().equals(order.getCompany().getId());
+                CustomUserPrincipal principal = getPrincipal();
+                yield order.getCompany().getId().equals(principal.getCompanyId());
             }
 
             case "RIDER" ->
